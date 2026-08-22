@@ -380,6 +380,9 @@ private fun FileConverterScreen(
     LaunchedEffect(Unit) { refreshLibrary() }
 
     // ──────────────────────────── UI ────────────────────────────
+    // Pull-to-refresh state for the main screen
+    var isRefreshing by remember { mutableStateOf(false) }
+
     Box(modifier = Modifier.fillMaxSize().background(BrutCream)) {
         BackgroundBlobs()
 
@@ -452,6 +455,17 @@ private fun FileConverterScreen(
                         filteredDeviceFiles = withContext(Dispatchers.IO) {
                             runCatching { queryDeviceFilesByFormat(context, format) }.getOrElse { emptyList() }
                         }.filter { it.uri.toString() !in deletedDeviceUris }
+                    }
+                },
+                isRefreshing = isRefreshing,
+                onRefresh = {
+                    isRefreshing = true
+                    scope.launch {
+                        deviceFileCounts = withContext(Dispatchers.IO) {
+                            runCatching { queryDeviceFileCounts(context) }.getOrElse { deviceFileCounts }
+                        }
+                        refreshLibrary()
+                        isRefreshing = false
                     }
                 },
             )

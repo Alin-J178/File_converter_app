@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.sp
  * The main conversion screen: top bar, file picker field, convert button, target format rows,
  * and the quality/resize settings card. State is hoisted to the caller.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 internal fun MainScreen(
     previews: List<Bitmap>,
@@ -80,8 +81,17 @@ internal fun MainScreen(
     onResetQuality: () -> Unit,
     onScaleChanged: (Int) -> Unit,
     onFormatTap: (String) -> Unit,
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val pullToRefreshState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        state = pullToRefreshState,
+        modifier = Modifier.fillMaxSize(),
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -362,6 +372,7 @@ internal fun MainScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
     }
+    } // PullToRefreshBox
 }
 
 /** Neo-brutalist selectable row used for the target format options. */
