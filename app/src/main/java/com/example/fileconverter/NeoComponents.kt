@@ -1,7 +1,10 @@
 package com.example.fileconverter
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,17 +24,26 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -327,8 +339,8 @@ data class PieSlice(
 )
 
 /**
- * Neo-brutalist donut pie chart with an inline legend.
- * Shows selected file format distribution; placeholder when nothing is selected.
+ * Neo-brutalist donut pie chart with a collapsible legend dropdown.
+ * The donut is centered; tapping the dropdown bar reveals a scrollable legend.
  */
 @Composable
 fun NeoPieChart(
@@ -336,63 +348,123 @@ fun NeoPieChart(
     slices: List<PieSlice> = emptyList(),
 ) {
     val chartBg = Color(0xFFE8CFA0)
+    var expanded by remember { mutableStateOf(false) }
 
-    NeoCard(
-        modifier = modifier,
-        backgroundColor = chartBg,
-        cornerRadius = 18.dp,
-        shadowOffset = 6.dp,
-    ) {
-        if (slices.isEmpty()) {
-            // Empty state placeholder
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "Select files to see format distribution",
-                    color = BrutMuted,
-                    fontSize = 14.sp,
-                )
-            }
-        } else {
-            Row(
+    Column(modifier = modifier) {
+        // Main card: donut chart + collapsible legend
+        NeoCard(
+            modifier = Modifier.fillMaxWidth(),
+            backgroundColor = chartBg,
+            cornerRadius = 18.dp,
+            shadowOffset = 6.dp,
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                // Donut chart
-                DonutChart(
-                    slices = slices,
-                    modifier = Modifier.size(140.dp),
-                )
-                Spacer(modifier = Modifier.width(20.dp))
-                // Legend with counts
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    slices.forEach { slice ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(slice.color)
-                                    .border(2.dp, BrutBlack, RoundedCornerShape(3.dp)),
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "${slice.label} (${slice.value.toInt()})",
-                                color = BrutBlack,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                            )
+                if (slices.isEmpty()) {
+                    // Empty state placeholder
+                    DonutChart(
+                        slices = listOf(PieSlice("", 1f, BrutGrey.copy(alpha = 0.3f))),
+                        modifier = Modifier.size(130.dp),
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "No saved files yet",
+                        color = BrutMuted,
+                        fontSize = 14.sp,
+                    )
+                } else {
+                    // Centered donut chart
+                    DonutChart(
+                        slices = slices,
+                        modifier = Modifier.size(150.dp),
+                    )
+
+                    // Collapsible legend
+                    AnimatedVisibility(
+                        visible = expanded,
+                        enter = expandVertically(expandFrom = androidx.compose.ui.Alignment.Top),
+                        exit = shrinkVertically(shrinkTowards = androidx.compose.ui.Alignment.Top),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 16.dp)
+                                .heightIn(max = 240.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            // Render legend items in a wrap layout
+                            val rows = slices.chunked(2)
+                            rows.forEach { row ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    row.forEach { slice ->
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(14.dp)
+                                                    .clip(RoundedCornerShape(3.dp))
+                                                    .background(slice.color)
+                                                    .border(2.dp, BrutBlack, RoundedCornerShape(3.dp)),
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "${slice.label} (${slice.value.toInt()})",
+                                                color = BrutBlack,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                            )
+                                        }
+                                    }
+                                    // Fill remaining space if odd number
+                                    if (row.size < 2) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
                         }
                     }
+                }
+            }
+        }
+
+        // Dropdown toggle bar
+        if (slices.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            val barShape = RoundedCornerShape(14.dp)
+            Box(modifier = Modifier.fillMaxWidth().height(44.dp)) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .offset(x = 4.dp, y = 5.dp)
+                        .clip(barShape)
+                        .background(BrutBlack),
+                )
+                Row(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clip(barShape)
+                        .background(Color.White)
+                        .border(3.dp, BrutBlack, barShape)
+                        .clickable { expanded = !expanded },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                        contentDescription = if (expanded) "Collapse" else "Expand",
+                        tint = BrutBlack,
+                        modifier = Modifier.size(28.dp),
+                    )
                 }
             }
         }
