@@ -113,6 +113,7 @@ private fun FileConverterScreen(
     var pendingWordUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var pendingPdfUri by remember { mutableStateOf<Uri?>(null) }
     var libraryThumbs by remember { mutableStateOf<Map<String, Bitmap>>(emptyMap()) }
+    var filteredThumbs by remember { mutableStateOf<Map<String, Bitmap>>(emptyMap()) }
     var librarySelectMode by remember { mutableStateOf(false) }
     var librarySelected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showSuccess by remember { mutableStateOf(false) }
@@ -431,23 +432,12 @@ private fun FileConverterScreen(
                 onScaleChanged = { scalePercent = it },
                 onFormatTap = { format ->
                     formatFilter = format
+                    filteredThumbs = emptyMap()
                     showRecent = true
                     scope.launch {
                         filteredDeviceFiles = withContext(Dispatchers.IO) {
                             runCatching { queryDeviceFilesByFormat(context, format) }.getOrElse { emptyList() }
                         }
-                        // Load thumbnails one-by-one so a single bad file doesn't crash everything
-                        val thumbs = mutableMapOf<String, Bitmap>()
-                        for (file in filteredDeviceFiles) {
-                            runCatching {
-                                withContext(Dispatchers.IO) {
-                                    thumbs[file.uri.toString()] =
-                                        ImageConverter.renderThumbnail(context, file.uri, file.name)
-                                            ?: ImageConverter.createPlaceholder(file.name)
-                                }
-                            }
-                        }
-                        libraryThumbs = thumbs
                     }
                 },
             )
@@ -463,7 +453,7 @@ private fun FileConverterScreen(
             LibraryScreen(
                 recentFiles = displayFiles,
                 title = if (formatFilter != null) "$formatFilter Files" else null,
-                thumbs = libraryThumbs,
+                thumbs = if (formatFilter != null) filteredThumbs else libraryThumbs,
                 selectMode = librarySelectMode,
                 selected = librarySelected,
                 onToggleSelect = { uri ->
@@ -480,12 +470,21 @@ private fun FileConverterScreen(
                 },
                 onDeleteSelected = {
                     scope.launch {
+                        val deletedUris = librarySelected.toSet()
                         librarySelected.forEach { uriStr ->
                             val uri = Uri.parse(uriStr)
                             ImageConverter.deleteFile(context, uri)
                         }
                         librarySelected = emptySet()
                         librarySelectMode = false
+                        // Clean up stale thumbnails
+                        libraryThumbs = libraryThumbs.keys.filter { it !in deletedUris }.associateWith { libraryThumbs[it]!! }
+                        filteredThumbs = filteredThumbs.keys.filter { it !in deletedUris }.associateWith { filteredThumbs[it]!! }
+                        if (formatFilter != null) {
+                            filteredDeviceFiles = withContext(Dispatchers.IO) {
+                                runCatching { queryDeviceFilesByFormat(context, formatFilter!!) }.getOrElse { emptyList() }
+                            }
+                        }
                         refreshLibrary()
                     }
                 },
@@ -497,7 +496,15 @@ private fun FileConverterScreen(
                 onClearAll = {
                     scope.launch {
                         recentFiles.forEach { ImageConverter.deleteFile(context, it.uri) }
+                        libraryThumbs = emptyMap()
                         refreshLibrary()
+                    }
+                },
+                onThumbLoaded = { uriStr, bmp ->
+                    if (formatFilter != null) {
+                        filteredThumbs = filteredThumbs + (uriStr to bmp)
+                    } else {
+                        libraryThumbs = libraryThumbs + (uriStr to bmp)
                     }
                 },
             )

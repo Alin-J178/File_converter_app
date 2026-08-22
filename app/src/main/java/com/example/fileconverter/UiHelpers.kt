@@ -106,7 +106,7 @@ private fun mimeTypesForFormat(label: String): List<String> = when (label.upperc
  * Queries the device MediaStore for all files matching [formatLabel] (e.g. "PNG", "JPEG", "PDF").
  * Returns a list of [RecentFile] suitable for displaying in [LibraryScreen].
  */
-internal fun queryDeviceFilesByFormat(context: Context, formatLabel: String, limit: Int = 100): List<RecentFile> {
+internal fun queryDeviceFilesByFormat(context: Context, formatLabel: String): List<RecentFile> {
     val mimes = mimeTypesForFormat(formatLabel)
     if (mimes.isEmpty()) return emptyList()
 
@@ -141,7 +141,7 @@ internal fun queryDeviceFilesByFormat(context: Context, formatLabel: String, lim
         val dateCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED)
         if (idCol < 0 || nameCol < 0) return@use
 
-        while (cursor.moveToNext() && results.size < limit) {
+        while (cursor.moveToNext()) {
             val id = cursor.getLong(idCol)
             val uri = android.content.ContentUris.withAppendedId(collection, id)
             results.add(
