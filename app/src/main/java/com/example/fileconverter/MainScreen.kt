@@ -228,7 +228,7 @@ internal fun MainScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = "PNG · JPEG · WebP · PDF",
+                            text = "PNG · JPEG · WebP · GIF · BMP · PDF",
                             color = BrutMuted,
                             fontSize = 12.sp,
                         )
@@ -294,6 +294,8 @@ internal fun MainScreen(
         ActionRow(text = "PNG", icon = Icons.Filled.PhotoLibrary, accent = BrutGreen, selected = outputFormat == OutputFormat.PNG, busy = busy || docBusy, onClick = { onFormatSelected(OutputFormat.PNG) })
         ActionRow(text = "JPEG", icon = Icons.Filled.Image, accent = BrutYellow, selected = outputFormat == OutputFormat.JPEG, busy = busy || docBusy, onClick = { onFormatSelected(OutputFormat.JPEG) })
         ActionRow(text = "WebP", icon = Icons.Filled.Photo, accent = BrutPink, selected = outputFormat == OutputFormat.WEBP, busy = busy || docBusy, onClick = { onFormatSelected(OutputFormat.WEBP) })
+        ActionRow(text = "GIF", icon = Icons.Filled.Photo, accent = BrutPurple, selected = outputFormat == OutputFormat.GIF, busy = busy || docBusy, onClick = { onFormatSelected(OutputFormat.GIF) })
+        ActionRow(text = "BMP", icon = Icons.Filled.Image, accent = BrutOrange, selected = outputFormat == OutputFormat.BMP, busy = busy || docBusy, onClick = { onFormatSelected(OutputFormat.BMP) })
         ActionRow(text = "PDF", icon = Icons.Filled.PictureAsPdf, accent = BrutBlue, selected = outputFormat == OutputFormat.PDF, busy = busy || docBusy, onClick = { onFormatSelected(OutputFormat.PDF) })
 
         Spacer(modifier = Modifier.height(4.dp))

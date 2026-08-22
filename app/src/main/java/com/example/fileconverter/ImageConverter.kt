@@ -34,6 +34,8 @@ enum class OutputFormat(
     JPEG("JPEG", "jpg", "image/jpeg", lossy = true),
     PNG("PNG", "png", "image/png", lossy = false),
     WEBP("WebP", "webp", "image/webp", lossy = true),
+    GIF("GIF", "gif", "image/gif", lossy = true),
+    BMP("BMP", "bmp", "image/bmp", lossy = false),
     PDF("PDF", "pdf", "application/pdf", lossy = true),
 }
 
@@ -61,6 +63,7 @@ object ImageConverter {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val source = ImageDecoder.createSource(context.contentResolver, uri)
             ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 decoder.setTargetSampleSize(computeSampleSize(info.size.width, info.size.height, maxDim))
             }
         } else {
@@ -140,6 +143,13 @@ object ImageConverter {
                     @Suppress("DEPRECATION")
                     Bitmap.CompressFormat.WEBP
                 }
+            OutputFormat.GIF -> {
+                // GIF encoding handled manually below
+                return saveAsGif(context, bitmap, quality, displayName)
+            }
+            OutputFormat.BMP -> {
+                return saveAsBmp(context, bitmap, displayName)
+            }
             OutputFormat.PDF -> error("PDF files are created via saveAsPdf")
         }
         val effectiveQuality = if (format.lossy) quality else 100
@@ -180,6 +190,352 @@ object ImageConverter {
      * huge images don't create unwieldy pages.
      */
     /** Decodes [uri], scales by [scalePercent], and saves in [format] at [quality]. */
+    /**
+     * Encodes [bitmap] as a GIF file (color-quantized to 256 colors, LZW compressed)
+     * and saves it to Pictures/FileConverter.
+     */
+    private fun saveAsGif(context: Context, bitmap: Bitmap, quality: Int, displayName: String): Uri {
+        val width = bitmap.width
+        val height = bitmap.height
+        val pixels = IntArray(width * height)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+        // Simple median-cut color quantization to 256 colors
+        val palette = buildGifPalette(pixels)
+        val indexedPixels = ByteArray(width * height)
+        for (i in pixels.indices) {
+            indexedPixels[i] = findClosestColor(pixels[i], palette).toByte()
+        }
+
+        val gifBytes = encodeGif(width, height, indexedPixels, palette)
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, displayName)
+                put(MediaStore.Downloads.MIME_TYPE, "image/gif")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/FileConverter")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val resolver = context.contentResolver
+            val uri = resolver.insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL), values)
+                ?: error("Failed to create MediaStore entry")
+            resolver.openOutputStream(uri)?.use { it.write(gifBytes) }
+                ?: error("Failed to open output stream")
+            resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+            uri
+        } else {
+            val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "FileConverter")
+            if (!dir.exists() && !dir.mkdirs()) error("Failed to create output directory")
+            val file = File(dir, displayName)
+            file.writeBytes(gifBytes)
+            Uri.fromFile(file)
+        }
+    }
+
+    /** Builds a 256-color palette from the pixel array using a simple median-cut approach. */
+    private fun buildGifPalette(pixels: IntArray): Array<IntArray> {
+        // Collect unique colors (sample if too many)
+        val step = if (pixels.size > 10000) pixels.size / 10000 else 1
+        val colorCounts = mutableMapOf<Int, Int>()
+        for (i in pixels.indices step step) {
+            val p = pixels[i] and 0xFFFFFF // drop alpha
+            colorCounts[p] = (colorCounts[p] ?: 0) + 1
+        }
+        val sorted = colorCounts.entries.sortedByDescending { it.value }.map { it.key }
+
+        // If 256 or fewer unique colors, use them directly
+        if (sorted.size <= 256) {
+            return Array(sorted.size) { i -> intArrayOf((sorted[i] shr 16) and 0xFF, (sorted[i] shr 8) and 0xFF, sorted[i] and 0xFF) }
+        }
+
+        // Median cut: recursively split buckets
+        val buckets = mutableListOf(sorted.map { intArrayOf((it shr 16) and 0xFF, (it shr 8) and 0xFF, it and 0xFF) }.toMutableList())
+        while (buckets.size < 256) {
+            // Find bucket with largest range
+            val maxIdx = buckets.indices.maxByOrNull { idx ->
+                val b = buckets[idx]
+                val rMin = b.minOf { c -> c[0] }
+                val rMax = b.maxOf { c -> c[0] }
+                val gMin = b.minOf { c -> c[1] }
+                val gMax = b.maxOf { c -> c[1] }
+                val bMin = b.minOf { c -> c[2] }
+                val bMax = b.maxOf { c -> c[2] }
+                maxOf(rMax - rMin, gMax - gMin, bMax - bMin)
+            } ?: break
+            val bucket = buckets.removeAt(maxIdx)
+            if (bucket.size < 2) { buckets.add(bucket); break }
+            // Split on the channel with the largest range
+            val ranges = listOf(
+                0 to bucket.maxOf { c -> c[0] } - bucket.minOf { c -> c[0] },
+                1 to bucket.maxOf { c -> c[1] } - bucket.minOf { c -> c[1] },
+                2 to bucket.maxOf { c -> c[2] } - bucket.minOf { c -> c[2] },
+            )
+            val splitChannel = ranges.maxByOrNull { r -> r.second }!!.first
+            val sortedBucket = bucket.sortedBy { c -> c[splitChannel] }
+            val mid = sortedBucket.size / 2
+            buckets.add(sortedBucket.subList(0, mid).toMutableList())
+            buckets.add(sortedBucket.subList(mid, sortedBucket.size).toMutableList())
+        }
+
+        // Average each bucket to get the palette
+        return Array(buckets.size.coerceAtMost(256)) { i ->
+            val b = buckets[i]
+            intArrayOf(
+                b.sumOf { it[0] } / b.size,
+                b.sumOf { it[1] } / b.size,
+                b.sumOf { it[2] } / b.size,
+            )
+        }
+    }
+
+    private fun findClosestColor(pixel: Int, palette: Array<IntArray>): Int {
+        val r = (pixel shr 16) and 0xFF
+        val g = (pixel shr 8) and 0xFF
+        val b = pixel and 0xFF
+        var bestIdx = 0
+        var bestDist = Int.MAX_VALUE
+        for (i in palette.indices) {
+            val dr = r - palette[i][0]
+            val dg = g - palette[i][1]
+            val db = b - palette[i][2]
+            val dist = dr * dr + dg * dg + db * db
+            if (dist < bestDist) {
+                bestDist = dist
+                bestIdx = i
+                if (dist == 0) break
+            }
+        }
+        return bestIdx
+    }
+
+    /** Writes a 16-bit little-endian value to a DataOutputStream. */
+    private fun writeShortLE(w: java.io.DataOutputStream, value: Int) {
+        w.writeByte(value and 0xFF)
+        w.writeByte((value shr 8) and 0xFF)
+    }
+
+    /** Encodes indexed pixels + palette as a GIF89a byte array with LZW compression. */
+    private fun encodeGif(width: Int, height: Int, indexedPixels: ByteArray, palette: Array<IntArray>): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val w = java.io.DataOutputStream(out)
+
+        // Header
+        w.writeBytes("GIF89a")
+        // Logical Screen Descriptor (little-endian)
+        writeShortLE(w, width)
+        writeShortLE(w, height)
+        // Global Color Table Flag: size field = log2(numColors) - 1, so 7 for 256
+        w.writeByte(0x80 or 0x70 or 7) // GCT flag=1, sort=0, size=7 (256 colors)
+        w.writeByte(0) // background color index
+        w.writeByte(0) // pixel aspect ratio
+
+        // Global Color Table
+        for (i in 0 until 256) {
+            if (i < palette.size) {
+                w.writeByte(palette[i][0])
+                w.writeByte(palette[i][1])
+                w.writeByte(palette[i][2])
+            } else {
+                w.writeByte(0)
+                w.writeByte(0)
+                w.writeByte(0)
+            }
+        }
+
+        // Image Descriptor
+        w.writeByte(0x2C) // image separator
+        writeShortLE(w, 0) // left
+        writeShortLE(w, 0) // top
+        writeShortLE(w, width)
+        writeShortLE(w, height)
+        w.writeByte(0) // no local color table
+
+        // LZW Minimum Code Size
+        val minCodeSize = 8
+        w.writeByte(minCodeSize)
+
+        // LZW compress
+        lzwCompress(w, indexedPixels, minCodeSize)
+
+        // Trailer
+        w.writeByte(0x3B)
+        w.flush()
+        return out.toByteArray()
+    }
+
+    private fun lzwCompress(out: java.io.DataOutputStream, pixels: ByteArray, minCodeSize: Int) {
+        val clearCode = 1 shl minCodeSize
+        val eoiCode = clearCode + 1
+        var codeSize = minCodeSize + 1
+        var nextCode = eoiCode + 1
+
+        // Use a HashMap with a packed Long key for O(1) lookup.
+        // Each code-table entry is a sequence of byte indices (0..255).
+        // For sequences up to 7 bytes we pack them into a Long;
+        // for longer sequences we fall back to ByteArray key.
+        val prefixMap = HashMap<Int, Int>() // prefix code -> next byte index -> new code
+        // Initialize: all single-byte sequences
+        // We use a two-level map: prefixCode -> (byte -> code)
+        // This is the standard way GIF LZW works.
+
+        var buffer = 0
+        var bitsInBuffer = 0
+        val blockBuffer = java.io.ByteArrayOutputStream()
+
+        fun writeCode(code: Int) {
+            buffer = buffer or (code shl bitsInBuffer)
+            bitsInBuffer += codeSize
+            while (bitsInBuffer >= 8) {
+                blockBuffer.write(buffer and 0xFF)
+                buffer = buffer shr 8
+                bitsInBuffer -= 8
+            }
+        }
+
+        writeCode(clearCode)
+
+        if (pixels.isEmpty()) {
+            writeCode(eoiCode)
+            if (bitsInBuffer > 0) blockBuffer.write(buffer and 0xFF)
+            writeBlock(out, blockBuffer.toByteArray())
+            return
+        }
+
+        // Standard LZW: track current prefix code and next byte
+        var currentCode = pixels[0].toInt() and 0xFF // single-byte code = the byte value itself
+
+        for (i in 1 until pixels.size) {
+            val nextByte = pixels[i].toInt() and 0xFF
+            val key = (currentCode shl 8) or nextByte
+            val existing = prefixMap[key]
+            if (existing != null) {
+                currentCode = existing
+            } else {
+                writeCode(currentCode)
+                if (nextCode < 4096) {
+                    prefixMap[key] = nextCode
+                    nextCode++
+                    if (nextCode > (1 shl codeSize) && codeSize < 12) {
+                        codeSize++
+                    }
+                } else {
+                    // Table full — reset
+                    writeCode(clearCode)
+                    prefixMap.clear()
+                    nextCode = eoiCode + 1
+                    codeSize = minCodeSize + 1
+                }
+                currentCode = nextByte
+            }
+        }
+
+        writeCode(currentCode)
+        writeCode(eoiCode)
+        if (bitsInBuffer > 0) blockBuffer.write(buffer and 0xFF)
+        writeBlock(out, blockBuffer.toByteArray())
+    }
+
+    private fun writeBlock(out: java.io.DataOutputStream, data: ByteArray) {
+        var offset = 0
+        while (offset < data.size) {
+            val blockSize = minOf(255, data.size - offset)
+            out.writeByte(blockSize)
+            out.write(data, offset, blockSize)
+            offset += blockSize
+        }
+        out.writeByte(0) // block terminator
+    }
+
+    /**
+     * Saves [bitmap] as an uncompressed BMP file and writes it to Pictures/FileConverter.
+     * Uses streaming write to avoid large memory allocations.
+     */
+    private fun saveAsBmp(context: Context, bitmap: Bitmap, displayName: String): Uri {
+        val width = bitmap.width
+        val height = bitmap.height
+        val bytesPerPixel = 3 // RGB24
+        val rowStride = ((width * bytesPerPixel + 3) / 4) * 4 // rows padded to 4 bytes
+        val imageDataSize = rowStride * height
+        val headerSize = 54 // BITMAPINFOHEADER
+        val fileSize = headerSize + imageDataSize
+
+        val header = ByteArray(headerSize)
+        val buf = java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+
+        // BMP File Header (14 bytes)
+        buf.put(0, 'B'.code.toByte())
+        buf.put(1, 'M'.code.toByte())
+        buf.putInt(2, fileSize)
+        buf.putShort(6, 0)
+        buf.putShort(8, 0)
+        buf.putInt(10, headerSize)
+
+        // BITMAPINFOHEADER (40 bytes)
+        buf.putInt(14, 40)
+        buf.putInt(18, width)
+        buf.putInt(22, -height) // negative = top-down
+        buf.putShort(26, 1)
+        buf.putShort(28, 24)
+        buf.putInt(30, 0)
+        buf.putInt(34, imageDataSize)
+        buf.putInt(38, 2835)
+        buf.putInt(42, 2835)
+        buf.putInt(46, 0)
+        buf.putInt(50, 0)
+
+        val resolver = context.contentResolver
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, displayName)
+                put(MediaStore.Downloads.MIME_TYPE, "image/bmp")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/FileConverter")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL), values)
+                ?: error("Failed to create MediaStore entry")
+            resolver.openOutputStream(uri)?.use { out ->
+                out.write(header)
+                // Write pixel data row-by-row to avoid large byte array
+                val pixels = IntArray(width)
+                val rowBytes = ByteArray(rowStride)
+                for (y in 0 until height) {
+                    bitmap.getPixels(pixels, 0, width, 0, y, width, 1)
+                    var off = 0
+                    for (x in 0 until width) {
+                        val pixel = pixels[x]
+                        rowBytes[off++] = (pixel and 0xFF).toByte()        // B
+                        rowBytes[off++] = ((pixel shr 8) and 0xFF).toByte() // G
+                        rowBytes[off++] = ((pixel shr 16) and 0xFF).toByte() // R
+                    }
+                    out.write(rowBytes)
+                }
+            } ?: error("Failed to open output stream")
+            resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+            uri
+        } else {
+            val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "FileConverter")
+            if (!dir.exists() && !dir.mkdirs()) error("Failed to create output directory")
+            val file = File(dir, displayName)
+            java.io.FileOutputStream(file).use { out ->
+                out.write(header)
+                val pixels = IntArray(width)
+                val rowBytes = ByteArray(rowStride)
+                for (y in 0 until height) {
+                    bitmap.getPixels(pixels, 0, width, 0, y, width, 1)
+                    var off = 0
+                    for (x in 0 until width) {
+                        val pixel = pixels[x]
+                        rowBytes[off++] = (pixel and 0xFF).toByte()
+                        rowBytes[off++] = ((pixel shr 8) and 0xFF).toByte()
+                        rowBytes[off++] = ((pixel shr 16) and 0xFF).toByte()
+                    }
+                    out.write(rowBytes)
+                }
+            }
+            Uri.fromFile(file)
+        }
+    }
+
     fun convert(context: Context, uri: Uri, format: OutputFormat, quality: Int, scalePercent: Int): ConversionResult {
         val bmp = decodeSampledBitmap(context, uri, maxDim = 4096)
         val w = bmp.width * scalePercent / 100

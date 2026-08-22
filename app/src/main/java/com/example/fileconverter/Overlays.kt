@@ -309,9 +309,9 @@ internal fun TutorialOverlay(onFinish: () -> Unit) {
                         verticalArrangement = Arrangement.Center,
                     ) {
                         val (icon, title, body, color) = when (page) {
-                            0 -> Quadruple(Icons.Filled.Image, "Welcome to File Converter", "Convert & compress images to JPEG, PNG, WebP or PDF. Everything stays on your device \u2014 nothing is uploaded.", BrutYellow)
+                            0 -> Quadruple(Icons.Filled.Image, "Welcome to File Converter", "Convert & compress images to JPEG, PNG, WebP, GIF, BMP or PDF. Everything stays on your device \u2014 nothing is uploaded.", BrutYellow)
                             1 -> Quadruple(Icons.Filled.PhotoLibrary, "Convert to any format", "Pick an image, choose your target format under Convert to, then tap +. You can also convert Word documents to PDF the same way.", BrutGreen)
-                            2 -> Quadruple(Icons.Filled.PictureAsPdf, "Compress anything", "The quality slider and resize buttons apply to your selected format. Pick PNG/JPEG/WebP above, then adjust the sliders. For PDFs, tap Pick PDF to compress, adjust sliders, then tap +.", BrutBlue)
+                            2 -> Quadruple(Icons.Filled.PictureAsPdf, "Compress anything", "The quality slider and resize buttons apply to your selected format. Pick PNG/JPEG/WebP/GIF/BMP above, then adjust the sliders. For PDFs, tap Pick PDF to compress, adjust sliders, then tap +.", BrutBlue)
                             else -> Quadruple(Icons.Filled.Folder, "Your converted files", "The folder icon shows your saved files. Long-press any file for details, rename, or open.", BrutPurple)
                         }
                         Box(

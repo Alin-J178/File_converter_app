@@ -194,8 +194,28 @@ private fun FileConverterScreen(
         }
     }
 
-
-
+    // Refresh pie chart counts when the app comes back to foreground
+    // (picks up files converted in other apps, screenshots, downloads, etc.)
+    val lifecycleOwner = remember {
+        context as? androidx.lifecycle.LifecycleOwner
+    }
+    if (lifecycleOwner != null) {
+        androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && hasMediaPermission) {
+                    scope.launch {
+                        deviceFileCounts = withContext(Dispatchers.IO) {
+                            runCatching { queryDeviceFileCounts(context) }.getOrElse { deviceFileCounts }
+                        }
+                    }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+            }
+        }
+    }
 
     // Pie-chart slices: device-wide counts from MediaStore
     // (includes app-converted files since they're indexed in MediaStore too)
