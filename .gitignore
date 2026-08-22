@@ -1,0 +1,44 @@
+# Built outputs
+*.apk
+*.aab
+*.idsig
+app/build/
+build/
+
+# Gradle
+.gradle/
+local.properties
+gradle-app.setting
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Keystore (never commit signing keys!)
+*.jks
+*.keystore
+
+# Test / temp files
+*.png
+*.xml
+!app/src/main/res/**/*.xml
+test_*
+emulator.log
+jadx/
+jadx.zip
+v2.8_source/
+smali/
+smali_classes2/
+original/
+unknown/
+assets/
+kotlin/
+lib/
+META-INF/
+res/

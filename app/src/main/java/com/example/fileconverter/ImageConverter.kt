@@ -1,0 +1,502 @@
+package com.example.fileconverter
+
+import android.content.ContentUris
+import android.content.ContentValues
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.ImageDecoder
+import android.graphics.pdf.PdfDocument
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import kotlin.math.min
+
+/** Largest PDF a single compress pass will render (keeps memory bounded). */
+private const val MAX_COMPRESS_PAGES = 20
+
+/**
+ * Output formats supported by the converter.
+ */
+enum class OutputFormat(
+    val label: String,
+    val extension: String,
+    val mimeType: String,
+    val lossy: Boolean,
+) {
+    JPEG("JPEG", "jpg", "image/jpeg", lossy = true),
+    PNG("PNG", "png", "image/png", lossy = false),
+    WEBP("WebP", "webp", "image/webp", lossy = true),
+    PDF("PDF", "pdf", "application/pdf", lossy = true),
+}
+
+/** A file previously saved by this app. */
+data class RecentFile(
+    val uri: Uri,
+    val name: String,
+    val sizeBytes: Long,
+    val dateAdded: Long,
+)
+
+/** A conversion/compression result. */
+data class ConversionResult(val uri: Uri, val sizeBytes: Long, val path: String, val format: OutputFormat)
+
+/**
+ * Converts images (e.g. PNG) to compressed JPEG/PNG/WebP using only Android's built-in APIs.
+ */
+object ImageConverter {
+
+    /**
+     * Decodes an image from a content [Uri], downsampling so the longest side is at most
+     * [maxDim] pixels. Downsampling avoids out-of-memory crashes on huge images.
+     */
+    fun decodeSampledBitmap(context: Context, uri: Uri, maxDim: Int = 4096): Bitmap {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val source = ImageDecoder.createSource(context.contentResolver, uri)
+            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                decoder.setTargetSampleSize(computeSampleSize(info.size.width, info.size.height, maxDim))
+            }
+        } else {
+            // Fallback for API 26-27
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            }
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = computeSampleSize(bounds.outWidth, bounds.outHeight, maxDim)
+            }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, options)
+            } ?: error("Could not decode image")
+        }
+    }
+
+    /**
+     * Renders a small preview of [uri]: the decoded image for pictures, or the first page of a
+     * PDF (via PdfRenderer) for PDFs. Returns null when nothing can be rendered.
+     */
+    fun renderThumbnail(context: Context, uri: Uri, name: String, maxDim: Int = 200): Bitmap? {
+        return try {
+            if (name.endsWith(".pdf", ignoreCase = true)) {
+                renderPdfPage(context, uri, page = 0, maxDim = maxDim)
+            } else {
+                decodeSampledBitmap(context, uri, maxDim = maxDim)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Renders [page] of the PDF at [uri] as a bitmap (index 0 = first page), scaled to [maxDim]. */
+    fun renderPdfPage(context: Context, uri: Uri, page: Int = 0, maxDim: Int = 300): Bitmap? {
+        return try {
+            val pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return null
+            pfd.use { fd ->
+                val renderer = PdfRenderer(fd)
+                try {
+                    if (page >= renderer.pageCount) {
+                        null
+                    } else {
+                        renderer.openPage(page).use { pdfPage ->
+                            val scale = minOf(1f, maxDim.toFloat() / pdfPage.width, maxDim.toFloat() / pdfPage.height)
+                            val w = maxOf(1, (pdfPage.width * scale).toInt())
+                            val h = maxOf(1, (pdfPage.height * scale).toInt())
+                            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                            bmp.eraseColor(Color.WHITE)
+                            pdfPage.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            bmp
+                        }
+                    }
+                } finally {
+                    renderer.close()
+                }
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Compresses [bitmap] to [format] at the given [quality] (0-100; ignored for
+     * lossless formats) and saves it to Pictures/FileConverter. On API 29+ it goes
+     * through MediaStore so it appears in the gallery; on older versions it is stored
+     * in the app's external files dir.
+     */
+    fun saveAs(context: Context, bitmap: Bitmap, format: OutputFormat, quality: Int, displayName: String): Uri {
+        val compressFormat = when (format) {
+            OutputFormat.JPEG -> Bitmap.CompressFormat.JPEG
+            OutputFormat.PNG -> Bitmap.CompressFormat.PNG
+            OutputFormat.WEBP ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    Bitmap.CompressFormat.WEBP_LOSSY
+                } else {
+                    @Suppress("DEPRECATION")
+                    Bitmap.CompressFormat.WEBP
+                }
+            OutputFormat.PDF -> error("PDF files are created via saveAsPdf")
+        }
+        val effectiveQuality = if (format.lossy) quality else 100
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+                put(MediaStore.Images.Media.MIME_TYPE, format.mimeType)
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/FileConverter")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val resolver = context.contentResolver
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: error("Failed to create MediaStore entry")
+            resolver.openOutputStream(uri)?.use { out ->
+                if (!bitmap.compress(compressFormat, effectiveQuality, out)) {
+                    error("Compression failed")
+                }
+            } ?: error("Failed to open output stream")
+            resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+            uri
+        } else {
+            val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "FileConverter")
+            if (!dir.exists() && !dir.mkdirs()) error("Failed to create output directory")
+            val file = File(dir, displayName)
+            FileOutputStream(file).use { out ->
+                if (!bitmap.compress(compressFormat, effectiveQuality, out)) {
+                    error("Compression failed")
+                }
+            }
+            Uri.fromFile(file)
+        }
+    }
+
+    /**
+     * Creates a PDF with one page per [bitmaps] entry and saves it to Download/FileConverter.
+     * Each page's image is re-encoded as JPEG at [quality] (0-100) before being embedded,
+     * which keeps the PDF file small — lower quality = smaller PDF. Page size is capped so
+     * huge images don't create unwieldy pages.
+     */
+    /** Decodes [uri], scales by [scalePercent], and saves in [format] at [quality]. */
+    fun convert(context: Context, uri: Uri, format: OutputFormat, quality: Int, scalePercent: Int): ConversionResult {
+        val bmp = decodeSampledBitmap(context, uri, maxDim = 4096)
+        val w = bmp.width * scalePercent / 100
+        val h = bmp.height * scalePercent / 100
+        val sized = if (w > 0 && h > 0 && (w != bmp.width || h != bmp.height)) {
+            Bitmap.createScaledBitmap(bmp, w, h, true)
+        } else bmp
+        val name = "converted_${System.currentTimeMillis()}.${format.extension}"
+        val outUri = if (format == OutputFormat.PDF) {
+            saveAsPdf(context, listOf(sized), quality, name)
+        } else {
+            saveAs(context, sized, format, quality, name)
+        }
+        if (sized !== bmp) sized.recycle()
+        return ConversionResult(outUri, querySize(context, outUri), displayPath(context, outUri), format)
+    }
+
+    fun saveAsPdf(context: Context, bitmaps: List<Bitmap>, quality: Int, displayName: String): Uri {
+        val document = PdfDocument()
+        try {
+            bitmaps.forEachIndexed { index, bmp ->
+                val pageBitmap = preparePdfPageBitmap(bmp, quality)
+                val pageInfo = PdfDocument.PageInfo.Builder(pageBitmap.width, pageBitmap.height, index).create()
+                val page = document.startPage(pageInfo)
+                page.canvas.drawBitmap(pageBitmap, 0f, 0f, null)
+                document.finishPage(page)
+                if (pageBitmap !== bmp) pageBitmap.recycle()
+            }
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, displayName)
+                    put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/FileConverter")
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL), values)
+                    ?: error("Failed to create MediaStore entry")
+                resolver.openOutputStream(uri)?.use { out -> document.writeTo(out) }
+                    ?: error("Failed to open output stream")
+                resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+                uri
+            } else {
+                val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "FileConverter")
+                if (!dir.exists() && !dir.mkdirs()) error("Failed to create output directory")
+                val file = File(dir, displayName)
+                FileOutputStream(file).use { out -> document.writeTo(out) }
+                Uri.fromFile(file)
+            }
+        } finally {
+            document.close()
+        }
+    }
+
+    /**
+     * Compresses an existing PDF: renders every page to a bitmap at ~2x resolution (scaled by
+     * [scalePercent]), then rebuilds a new PDF via [saveAsPdf] which re-encodes each page as
+     * JPEG at [quality]. Text becomes part of the page image, so the output is usually much
+     * smaller — at the cost of selectable text. Pages are capped at [MAX_COMPRESS_PAGES] to
+     * keep memory bounded.
+     */
+    fun compressPdf(context: Context, uri: Uri, quality: Int, scalePercent: Int, displayName: String): Uri {
+        val bitmaps = mutableListOf<Bitmap>()
+        try {
+            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+                ?: error("Could not open the PDF file")
+            PdfRenderer(pfd).use { renderer ->
+                val pageCount = renderer.pageCount
+                if (pageCount == 0) error("This PDF has no pages")
+                if (pageCount > MAX_COMPRESS_PAGES) {
+                    error("This PDF has $pageCount pages — the compressor handles up to $MAX_COMPRESS_PAGES")
+                }
+                for (i in 0 until pageCount) {
+                    val bmp = renderer.openPage(i).use { page ->
+                        val scale = 2f * scalePercent / 100f
+                        val w = (page.width * scale).toInt().coerceAtLeast(1)
+                        val h = (page.height * scale).toInt().coerceAtLeast(1)
+                        val pageBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                        pageBmp.eraseColor(Color.WHITE)
+                        page.render(pageBmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        pageBmp
+                    }
+                    bitmaps += bmp
+                }
+            }
+            pfd.close()
+            return saveAsPdf(context, bitmaps, quality, displayName)
+        } finally {
+            bitmaps.forEach { it.recycle() }
+        }
+    }
+
+    /**
+     * Scales [bmp] so its longest side is at most 2400px, composites transparency onto white
+     * (JPEG has no alpha), and re-encodes as JPEG at [quality] so the embedded image stays small.
+     */
+    private fun preparePdfPageBitmap(bmp: Bitmap, quality: Int): Bitmap {
+        val maxDim = 2400
+        val largest = maxOf(bmp.width, bmp.height)
+        val scale = if (largest > maxDim) maxDim.toFloat() / largest else 1f
+        val sized = if (scale < 1f) {
+            Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true)
+        } else bmp
+        if (quality >= 100) return sized
+        val flattened = if (sized.hasAlpha()) {
+            val white = Bitmap.createBitmap(sized.width, sized.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(white)
+            canvas.drawColor(Color.WHITE)
+            canvas.drawBitmap(sized, 0f, 0f, null)
+            white
+        } else sized
+        val bytes = ByteArrayOutputStream().also { flattened.compress(Bitmap.CompressFormat.JPEG, quality, it) }.toByteArray()
+        val result = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: error("Could not re-encode image for PDF")
+        if (flattened !== sized) flattened.recycle()
+        if (sized !== bmp) sized.recycle()
+        return result
+    }
+
+    /** Byte size of the file behind [uri]. */
+    fun querySize(context: Context, uri: Uri): Long {
+        return context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: 0L
+    }
+
+    /**
+     * Lists the most recently converted files (images and PDFs) saved by this app.
+     */
+    fun recentConversions(context: Context, limit: Int = 20): List<RecentFile> {
+        val results = mutableListOf<RecentFile>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            fun collect(collection: Uri) {
+                val projection = arrayOf(
+                    MediaStore.MediaColumns._ID,
+                    MediaStore.MediaColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.SIZE,
+                    MediaStore.MediaColumns.DATE_ADDED,
+                )
+                val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+                val selectionArgs = arrayOf("%/FileConverter/%")
+                context.contentResolver.query(
+                    collection,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    "${MediaStore.MediaColumns.DATE_ADDED} DESC",
+                )?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                    val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+                    while (cursor.moveToNext()) {
+                        results += RecentFile(
+                            uri = ContentUris.withAppendedId(collection, cursor.getLong(idCol)),
+                            name = cursor.getString(nameCol) ?: "file",
+                            sizeBytes = cursor.getLong(sizeCol),
+                            // DATE_ADDED is Unix seconds — normalize to millis to match file.lastModified()
+                            dateAdded = cursor.getLong(dateCol) * 1000L,
+                        )
+                    }
+                }
+            }
+            collect(MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL))
+            collect(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL))
+        } else {
+            val dirs = listOf(
+                File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "FileConverter"),
+                File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "FileConverter"),
+            )
+            dirs.forEach { dir ->
+                dir.listFiles()?.forEach { file ->
+                    results += RecentFile(Uri.fromFile(file), file.name, file.length(), file.lastModified())
+                }
+            }
+        }
+        return results.sortedByDescending { it.dateAdded }.take(limit)
+    }
+
+    /**
+     * Counts ALL images and PDFs on the device (not just FileConverter),
+     * grouped by file extension (lowercase, e.g. "jpg", "png", "pdf").
+     */
+    fun countAllFileTypes(context: Context): Map<String, Int> {
+        val counts = mutableMapOf<String, Int>()
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                fun collect(collection: Uri, mimeFilter: String? = null) {
+                    val projection = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val sel = mimeFilter?.let { "${MediaStore.MediaColumns.MIME_TYPE} LIKE ?" }
+                    val args = mimeFilter?.let { arrayOf(it) }
+                    context.contentResolver.query(
+                        collection, projection, sel, args, null,
+                    )?.use { cursor ->
+                        val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                        while (cursor.moveToNext()) {
+                            val name = cursor.getString(nameCol) ?: continue
+                            val ext = name.substringAfterLast('.', "").lowercase()
+                            if (ext.isNotEmpty()) {
+                                counts[ext] = (counts[ext] ?: 0) + 1
+                            }
+                        }
+                    }
+                }
+                collect(MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL))
+                collect(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL), "application/pdf")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("FileConverter", "countAllFileTypes failed", e)
+        }
+        return counts
+    }
+
+    /** Best-effort display name for a content [uri] (e.g. "report.docx"). */
+    fun queryDisplayName(context: Context, uri: Uri): String {
+        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                val name = c.getString(0)
+                if (!name.isNullOrBlank()) return name
+            }
+        }
+        return uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+    }
+
+    /** True pixel dimensions of the image at [uri] (bounds-only decode — no full bitmap). */
+    fun queryDimensions(context: Context, uri: Uri): Pair<Int, Int>? {
+        return try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            }
+            if (bounds.outWidth > 0 && bounds.outHeight > 0) bounds.outWidth to bounds.outHeight else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Deletes a file saved by this app (it owns the MediaStore rows it created).
+     * The physical path is also removed, since some providers (Downloads on some
+     * devices) drop the database row but leave the file behind.
+     */
+    fun deleteFile(context: Context, uri: Uri): Boolean {
+        return try {
+            if (uri.scheme == "content") {
+                val path = runCatching {
+                    context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)
+                        ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                }.getOrNull()
+                val deleted = context.contentResolver.delete(uri, null, null) > 0
+                if (!path.isNullOrBlank()) {
+                    val file = File(path)
+                    if (file.exists()) file.delete()
+                }
+                deleted
+            } else {
+                uri.path?.let { File(it) }?.let { it.exists() && it.delete() } ?: false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** Renames a media file via MediaStore. Returns true on success. */
+    fun renameFile(context: Context, uri: Uri, newName: String): Boolean {
+        return try {
+            if (uri.scheme == "content") {
+                val values = android.content.ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, newName)
+                }
+                context.contentResolver.update(uri, values, null, null) > 0
+            } else {
+                uri.path?.let { File(it) }?.let { file ->
+                    val newFile = File(file.parent, newName)
+                    file.renameTo(newFile)
+                } ?: false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** Human-friendly path for display, e.g. "Pictures/FileConverter/photo.jpg". */
+    fun displayPath(context: Context, uri: Uri): String {
+        if (uri.scheme != "content") return uri.path ?: uri.toString()
+        val projection = arrayOf(
+            MediaStore.Images.Media.DISPLAY_NAME,
+            MediaStore.Images.Media.RELATIVE_PATH,
+        )
+        context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val name = cursor.getString(0)
+                val rel = cursor.getString(1)
+                return (rel ?: "Pictures/") + name
+            }
+        }
+        return uri.toString()
+    }
+
+    /** Powers-of-two sample size that keeps the longest side at or under [maxDim]. */
+    private fun computeSampleSize(width: Int, height: Int, maxDim: Int): Int {
+        if (width <= 0 || height <= 0 || maxDim <= 0) return 1
+        var sample = 1
+        while (maxOf(width, height) / (sample * 2) >= maxDim) {
+            sample *= 2
+        }
+        return sample
+    }
+
+    /** Creates a simple colored placeholder bitmap for files that can't be thumbnailed. */
+    fun createPlaceholder(name: String): Bitmap {
+        val color = when (name.substringAfterLast('.', "").lowercase()) {
+            "pdf" -> 0xFFFF5FA2.toInt()
+            "doc", "docx" -> 0xFFFF9F1C.toInt()
+            else -> 0xFF7A7A7A.toInt()
+        }
+        val bmp = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        canvas.drawColor(color)
+        return bmp
+    }
+}
