@@ -8,6 +8,8 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -127,6 +129,7 @@ private fun FileConverterScreen(
     // Format filter for browsing device files by type from pie chart legend
     var formatFilter by remember { mutableStateOf<String?>(null) }
     var filteredDeviceFiles by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
+    var deletedDeviceUris by remember { mutableStateOf<Map<String, String>>(emptyMap()) } // uri -> format label
 
     val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
     var showTutorial by remember { mutableStateOf(!prefs.getBoolean("tutorial_done", false)) }
@@ -163,6 +166,19 @@ private fun FileConverterScreen(
             }
         }
     }
+
+    // Full file access (MANAGE_EXTERNAL_STORAGE) — needed to truly delete any file
+    val hasFullAccess = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+    val fullAccessLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        // Re-check after returning from settings
+        val nowGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+        if (nowGranted) {
+            Toast.makeText(context, "Full file access granted!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+
+
 
     // Pie-chart slices: merge device-wide counts with app converted file counts
     val pieChartSlices by remember {
@@ -437,7 +453,7 @@ private fun FileConverterScreen(
                     scope.launch {
                         filteredDeviceFiles = withContext(Dispatchers.IO) {
                             runCatching { queryDeviceFilesByFormat(context, format) }.getOrElse { emptyList() }
-                        }
+                        }.filter { it.uri.toString() !in deletedDeviceUris }
                     }
                 },
             )
@@ -469,23 +485,47 @@ private fun FileConverterScreen(
                     }
                 },
                 onDeleteSelected = {
+                    if (!hasFullAccess) {
+                        // Need full file access to delete files from other apps
+                        Toast.makeText(context, "Grant All Files Access to delete any file on your device", Toast.LENGTH_LONG).show()
+                        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        }
+                        fullAccessLauncher.launch(intent)
+                        return@LibraryScreen
+                    }
                     scope.launch {
                         val deletedUris = librarySelected.toSet()
+                        var anyFailed = false
                         librarySelected.forEach { uriStr ->
                             val uri = Uri.parse(uriStr)
-                            ImageConverter.deleteFile(context, uri)
+                            val deleted = ImageConverter.deleteFile(context, uri)
+                            if (!deleted) anyFailed = true
                         }
                         librarySelected = emptySet()
                         librarySelectMode = false
                         // Clean up stale thumbnails
                         libraryThumbs = libraryThumbs.keys.filter { it !in deletedUris }.associateWith { libraryThumbs[it]!! }
                         filteredThumbs = filteredThumbs.keys.filter { it !in deletedUris }.associateWith { filteredThumbs[it]!! }
+                        // Track device files we tried to delete so they don't reappear
                         if (formatFilter != null) {
-                            filteredDeviceFiles = withContext(Dispatchers.IO) {
-                                runCatching { queryDeviceFilesByFormat(context, formatFilter!!) }.getOrElse { emptyList() }
-                            }
+                            val formatLabel = formatFilter!!
+                            val deletedMap = deletedUris.associateWith { formatLabel }
+                            deletedDeviceUris = deletedDeviceUris + deletedMap
+                            filteredDeviceFiles = filteredDeviceFiles.filter { it.uri.toString() !in deletedDeviceUris }
                         }
+                        // Re-query device counts — with full access, deleted files are actually gone
+                        deviceFileCounts = withContext(Dispatchers.IO) {
+                            runCatching { queryDeviceFileCounts(context) }.getOrElse { deviceFileCounts }
+                        }
+                        // Also clear any locally-tracked deletes that are now truly deleted
+                        deletedDeviceUris = emptyMap()
                         refreshLibrary()
+                        if (anyFailed) {
+                            Toast.makeText(context, "Some files couldn't be deleted", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "${deletedUris.size} file${if (deletedUris.size > 1) "s" else ""} deleted", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 },
                 onLongPress = { file, dims, path ->
@@ -498,6 +538,7 @@ private fun FileConverterScreen(
                         recentFiles.forEach { ImageConverter.deleteFile(context, it.uri) }
                         libraryThumbs = emptyMap()
                         refreshLibrary()
+                        Toast.makeText(context, "All converted files cleared", Toast.LENGTH_SHORT).show()
                     }
                 },
                 onThumbLoaded = { uriStr, bmp ->
