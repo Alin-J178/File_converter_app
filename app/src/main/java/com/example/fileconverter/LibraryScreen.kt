@@ -63,6 +63,7 @@ internal fun LibraryScreen(
     onDeleteSelected: () -> Unit,
     onLongPress: (RecentFile, Pair<Int, Int>?, String?) -> Unit,
     onClearAll: () -> Unit,
+    title: String? = null,
 ) {
     val context = LocalContext.current
     Box(
@@ -91,7 +92,7 @@ internal fun LibraryScreen(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    "Saved in Storage",
+                    title ?: "Saved in Storage",
                     color = BrutBlack,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Black,

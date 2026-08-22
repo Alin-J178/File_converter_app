@@ -79,6 +79,7 @@ internal fun MainScreen(
     onQualityChanged: (Float) -> Unit,
     onResetQuality: () -> Unit,
     onScaleChanged: (Int) -> Unit,
+    onFormatTap: (String) -> Unit,
 ) {
     val context = LocalContext.current
     Column(
@@ -105,7 +106,7 @@ internal fun MainScreen(
         }
 
         // Pie chart — file format distribution
-        NeoPieChart(slices = pieChartSlices, modifier = Modifier.fillMaxWidth())
+        NeoPieChart(slices = pieChartSlices, modifier = Modifier.fillMaxWidth(), onSliceClick = onFormatTap)
 
         // File selection row
         Row(

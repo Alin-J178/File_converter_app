@@ -346,6 +346,7 @@ data class PieSlice(
 fun NeoPieChart(
     modifier: Modifier = Modifier,
     slices: List<PieSlice> = emptyList(),
+    onSliceClick: ((String) -> Unit)? = null,
 ) {
     val chartBg = Color(0xFFE8CFA0)
     var expanded by remember { mutableStateOf(false) }
@@ -406,7 +407,13 @@ fun NeoPieChart(
                                 ) {
                                     row.forEach { slice ->
                                         Row(
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .then(
+                                                    if (onSliceClick != null) {
+                                                        Modifier.clickable { onSliceClick(slice.label) }
+                                                    } else Modifier
+                                                ),
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
                                             Box(

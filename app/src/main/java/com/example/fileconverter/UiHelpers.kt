@@ -90,3 +90,70 @@ internal fun queryDeviceFileCounts(context: Context): Map<String, Int> {
 
     return counts
 }
+
+/** MIME types that map to each pie-chart format label. */
+private fun mimeTypesForFormat(label: String): List<String> = when (label.uppercase()) {
+    "PNG" -> listOf("image/png")
+    "JPEG" -> listOf("image/jpeg", "image/jpg")
+    "WEBP" -> listOf("image/webp")
+    "GIF" -> listOf("image/gif")
+    "BMP" -> listOf("image/bmp")
+    "PDF" -> listOf("application/pdf")
+    else -> emptyList()
+}
+
+/**
+ * Queries the device MediaStore for all files matching [formatLabel] (e.g. "PNG", "JPEG", "PDF").
+ * Returns a list of [RecentFile] suitable for displaying in [LibraryScreen].
+ */
+internal fun queryDeviceFilesByFormat(context: Context, formatLabel: String, limit: Int = 100): List<RecentFile> {
+    val mimes = mimeTypesForFormat(formatLabel)
+    if (mimes.isEmpty()) return emptyList()
+
+    val results = mutableListOf<RecentFile>()
+    val isPdf = formatLabel.uppercase() == "PDF"
+    val collection = if (isPdf) {
+        MediaStore.Files.getContentUri("external")
+    } else {
+        MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+    }
+    val projection = arrayOf(
+        MediaStore.MediaColumns._ID,
+        MediaStore.MediaColumns.DISPLAY_NAME,
+        MediaStore.MediaColumns.SIZE,
+        MediaStore.MediaColumns.DATE_ADDED,
+    )
+    val mimeCol = MediaStore.MediaColumns.MIME_TYPE
+    val selection = "${mimeCol} IN (${mimes.joinToString { "?" }})"
+    val sortOrder = "${MediaStore.MediaColumns.DATE_ADDED} DESC"
+
+    runCatching {
+    context.contentResolver.query(
+        collection,
+        projection,
+        selection,
+        mimes.toTypedArray(),
+        sortOrder,
+    )?.use { cursor ->
+        val idCol = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
+        val nameCol = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+        val sizeCol = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
+        val dateCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED)
+        if (idCol < 0 || nameCol < 0) return@use
+
+        while (cursor.moveToNext() && results.size < limit) {
+            val id = cursor.getLong(idCol)
+            val uri = android.content.ContentUris.withAppendedId(collection, id)
+            results.add(
+                RecentFile(
+                    uri = uri,
+                    name = cursor.getString(nameCol) ?: "unknown",
+                    sizeBytes = cursor.getLong(sizeCol),
+                    dateAdded = cursor.getLong(dateCol) * 1000, // seconds -> millis
+                )
+            )
+        }
+    }
+    }.onFailure { android.util.Log.w("FileConverter", "queryDeviceFilesByFormat failed", it) }
+    return results
+}

@@ -123,6 +123,10 @@ private fun FileConverterScreen(
     var infoRenameText by remember { mutableStateOf("") }
     LaunchedEffect(infoFile) { infoEditing = false }
 
+    // Format filter for browsing device files by type from pie chart legend
+    var formatFilter by remember { mutableStateOf<String?>(null) }
+    var filteredDeviceFiles by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
+
     val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
     var showTutorial by remember { mutableStateOf(!prefs.getBoolean("tutorial_done", false)) }
 
@@ -425,6 +429,27 @@ private fun FileConverterScreen(
                 onQualityChanged = { quality = it },
                 onResetQuality = { quality = 85f },
                 onScaleChanged = { scalePercent = it },
+                onFormatTap = { format ->
+                    formatFilter = format
+                    showRecent = true
+                    scope.launch {
+                        filteredDeviceFiles = withContext(Dispatchers.IO) {
+                            runCatching { queryDeviceFilesByFormat(context, format) }.getOrElse { emptyList() }
+                        }
+                        // Load thumbnails one-by-one so a single bad file doesn't crash everything
+                        val thumbs = mutableMapOf<String, Bitmap>()
+                        for (file in filteredDeviceFiles) {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    thumbs[file.uri.toString()] =
+                                        ImageConverter.renderThumbnail(context, file.uri, file.name)
+                                            ?: ImageConverter.createPlaceholder(file.name)
+                                }
+                            }
+                        }
+                        libraryThumbs = thumbs
+                    }
+                },
             )
         }
 
@@ -434,15 +459,17 @@ private fun FileConverterScreen(
         )
 
         if (showRecent) {
+            val displayFiles = if (formatFilter != null) filteredDeviceFiles else recentFiles
             LibraryScreen(
-                recentFiles = recentFiles,
+                recentFiles = displayFiles,
+                title = if (formatFilter != null) "$formatFilter Files" else null,
                 thumbs = libraryThumbs,
                 selectMode = librarySelectMode,
                 selected = librarySelected,
                 onToggleSelect = { uri ->
                     librarySelected = if (uri in librarySelected) librarySelected - uri else librarySelected + uri
                 },
-                onBack = { showRecent = false; infoFile = null; infoEditing = false },
+                onBack = { showRecent = false; formatFilter = null; infoFile = null; infoEditing = false },
                 onToggleSelectMode = {
                     if (librarySelectMode) {
                         librarySelectMode = false
