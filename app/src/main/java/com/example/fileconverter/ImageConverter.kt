@@ -82,7 +82,7 @@ object ImageConverter {
      * Renders a small preview of [uri]: the decoded image for pictures, or the first page of a
      * PDF (via PdfRenderer) for PDFs. Returns null when nothing can be rendered.
      */
-    fun renderThumbnail(context: Context, uri: Uri, name: String, maxDim: Int = 200): Bitmap? {
+    fun renderThumbnail(context: Context, uri: Uri, name: String, maxDim: Int = 128): Bitmap? {
         return try {
             if (name.endsWith(".pdf", ignoreCase = true)) {
                 renderPdfPage(context, uri, page = 0, maxDim = maxDim)

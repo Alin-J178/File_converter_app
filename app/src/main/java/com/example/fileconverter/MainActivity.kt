@@ -31,6 +31,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -114,8 +115,8 @@ private fun FileConverterScreen(
     var recentFiles by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
     var pendingWordUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var pendingPdfUri by remember { mutableStateOf<Uri?>(null) }
-    var libraryThumbs by remember { mutableStateOf<Map<String, Bitmap>>(emptyMap()) }
-    var filteredThumbs by remember { mutableStateOf<Map<String, Bitmap>>(emptyMap()) }
+    val libraryThumbs = remember { mutableStateMapOf<String, Bitmap>() }
+    val filteredThumbs = remember { mutableStateMapOf<String, Bitmap>() }
     var librarySelectMode by remember { mutableStateOf(false) }
     var librarySelected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showSuccess by remember { mutableStateOf(false) }
@@ -371,11 +372,13 @@ private fun FileConverterScreen(
             recentFiles = withContext(Dispatchers.IO) {
                 ImageConverter.recentConversions(context)
             }
-            libraryThumbs = withContext(Dispatchers.IO) {
+            val newThumbs = withContext(Dispatchers.IO) {
                 recentFiles.associate { file ->
                     file.uri.toString() to (ImageConverter.renderThumbnail(context, file.uri, file.name) ?: ImageConverter.createPlaceholder(file.name))
                 }
             }
+            libraryThumbs.clear()
+            libraryThumbs.putAll(newThumbs)
         }
     }
 
@@ -448,7 +451,7 @@ private fun FileConverterScreen(
                 onScaleChanged = { scalePercent = it },
                 onFormatTap = { format ->
                     formatFilter = format
-                    filteredThumbs = emptyMap()
+                    filteredThumbs.clear()
                     showRecent = true
                     scope.launch {
                         filteredDeviceFiles = withContext(Dispatchers.IO) {
@@ -505,8 +508,10 @@ private fun FileConverterScreen(
                         librarySelected = emptySet()
                         librarySelectMode = false
                         // Clean up stale thumbnails
-                        libraryThumbs = libraryThumbs.keys.filter { it !in deletedUris }.associateWith { libraryThumbs[it]!! }
-                        filteredThumbs = filteredThumbs.keys.filter { it !in deletedUris }.associateWith { filteredThumbs[it]!! }
+                        deletedUris.forEach { uri ->
+                            libraryThumbs.remove(uri)
+                            filteredThumbs.remove(uri)
+                        }
                         // Track device files we tried to delete so they don't reappear
                         if (formatFilter != null) {
                             val formatLabel = formatFilter!!
@@ -536,16 +541,16 @@ private fun FileConverterScreen(
                 onClearAll = {
                     scope.launch {
                         recentFiles.forEach { ImageConverter.deleteFile(context, it.uri) }
-                        libraryThumbs = emptyMap()
+                        libraryThumbs.clear()
                         refreshLibrary()
                         Toast.makeText(context, "All converted files cleared", Toast.LENGTH_SHORT).show()
                     }
                 },
                 onThumbLoaded = { uriStr, bmp ->
                     if (formatFilter != null) {
-                        filteredThumbs = filteredThumbs + (uriStr to bmp)
+                        filteredThumbs[uriStr] = bmp
                     } else {
-                        libraryThumbs = libraryThumbs + (uriStr to bmp)
+                        libraryThumbs[uriStr] = bmp
                     }
                 },
             )
