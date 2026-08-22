@@ -168,13 +168,29 @@ private fun FileConverterScreen(
         }
     }
 
-    // Full file access (MANAGE_EXTERNAL_STORAGE) — needed to truly delete any file
+    // Full file access (MANAGE_EXTERNAL_STORAGE) — needed for PDFs in pie chart & true deletion
     val hasFullAccess = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
     val fullAccessLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         // Re-check after returning from settings
         val nowGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
         if (nowGranted) {
             Toast.makeText(context, "Full file access granted!", Toast.LENGTH_SHORT).show()
+        }
+        // Re-query device file counts so PDFs appear in the pie chart
+        scope.launch {
+            deviceFileCounts = withContext(Dispatchers.IO) {
+                queryDeviceFileCounts(context)
+            }
+        }
+    }
+    // Request full file access on startup so PDFs are available in the pie chart
+    LaunchedEffect(hasMediaPermission) {
+        if (hasMediaPermission && !hasFullAccess && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Toast.makeText(context, "Grant file access to show all file types in the chart", Toast.LENGTH_LONG).show()
+            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                data = Uri.parse("package:${context.packageName}")
+            }
+            fullAccessLauncher.launch(intent)
         }
     }
 
