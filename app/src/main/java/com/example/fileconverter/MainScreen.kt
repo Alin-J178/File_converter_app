@@ -103,6 +103,9 @@ internal fun MainScreen(
             )
         }
 
+        // Pie chart — file format distribution
+        NeoPieChart(modifier = Modifier.fillMaxWidth())
+
         // File selection row
         Row(
             verticalAlignment = Alignment.CenterVertically,
