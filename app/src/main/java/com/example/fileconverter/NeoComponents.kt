@@ -483,7 +483,7 @@ fun NeoPieChart(
 private fun DonutChart(
     slices: List<PieSlice>,
     modifier: Modifier = Modifier,
-    strokeWidth: Dp = 28.dp,
+    strokeWidth: Dp = 55.dp,
 ) {
     val total = slices.sumOf { it.value.toDouble() }.toFloat()
     if (total <= 0f) return
@@ -495,8 +495,9 @@ private fun DonutChart(
     }
 
     Canvas(modifier = modifier) {
-        val stroke = strokeWidth.toPx()
-        val diameter = minOf(size.width, size.height) - stroke
+        val outlineWidth = strokeWidth.toPx()
+        val fillWidth = outlineWidth - 6f // inner fill is 3px thinner on each side
+        val diameter = minOf(size.width, size.height) - outlineWidth
         val topLeft = Offset(
             (size.width - diameter) / 2f,
             (size.height - diameter) / 2f,
@@ -507,16 +508,28 @@ private fun DonutChart(
         var startAngle = -90f
         slices.forEach { slice ->
             val sweep = (slice.value / total) * 360f * progress
+            val gap = 2f
+            // Black outline (drawn first, slightly wider)
             drawArc(
-                color = slice.color,
+                color = BrutBlack,
                 startAngle = startAngle,
-                sweepAngle = sweep - 2f, // small gap between slices
+                sweepAngle = sweep - gap,
                 useCenter = false,
                 topLeft = topLeft,
                 size = arcSize,
-                style = Stroke(width = stroke, cap = StrokeCap.Butt),
+                style = Stroke(width = outlineWidth, cap = StrokeCap.Butt),
             )
-            startAngle += sweep + 2f // re-add gap so next arc starts correctly
+            // Colored fill on top
+            drawArc(
+                color = slice.color,
+                startAngle = startAngle,
+                sweepAngle = sweep - gap,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = fillWidth, cap = StrokeCap.Butt),
+            )
+            startAngle += sweep + gap
         }
     }
 }
