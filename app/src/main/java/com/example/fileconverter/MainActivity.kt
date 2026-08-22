@@ -181,15 +181,10 @@ private fun FileConverterScreen(
 
 
 
-    // Pie-chart slices: merge device-wide counts with app converted file counts
+    // Pie-chart slices: device-wide counts from MediaStore
+    // (includes app-converted files since they're indexed in MediaStore too)
     val pieChartSlices by remember {
         derivedStateOf {
-            val appCounts = countFormatsByExtension(recentFiles)
-            // Merge: device-wide counts + app converted file counts
-            val merged = deviceFileCounts.toMutableMap()
-            for ((label, count) in appCounts) {
-                merged[label] = (merged[label] ?: 0) + count
-            }
             val colorMap = mapOf(
                 "PNG" to BrutGreen,
                 "JPEG" to BrutYellow,
@@ -198,7 +193,7 @@ private fun FileConverterScreen(
                 "BMP" to BrutOrange,
                 "PDF" to BrutBlue,
             )
-            merged.filter { it.value > 0 }.map { (label, count) ->
+            deviceFileCounts.filter { it.value > 0 }.map { (label, count) ->
                 PieSlice(label, count.toFloat(), colorMap[label] ?: BrutGrey)
             }
         }
