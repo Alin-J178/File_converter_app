@@ -329,7 +329,14 @@ private fun FileConverterScreen(
                 }
             }
             results = converted
-            if (converted.isNotEmpty()) showSuccess = true
+            if (converted.isNotEmpty()) {
+                showSuccess = true
+                // Reset the picker field back to its empty "Tap to select an image" state.
+                selectedUris = emptyList()
+                previews = emptyList()
+                originalSize = 0
+                originalDims = null
+            }
             busy = false
         }
     }
