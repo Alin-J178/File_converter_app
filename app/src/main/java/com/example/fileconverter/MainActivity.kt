@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -120,6 +121,24 @@ private fun FileConverterScreen(
 
     val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
     var showTutorial by remember { mutableStateOf(!prefs.getBoolean("tutorial_done", false)) }
+
+    // Pie-chart slices derived from saved files on the phone
+    val pieChartSlices by remember {
+        derivedStateOf {
+            val counts = countFormatsByExtension(recentFiles)
+            val colorMap = mapOf(
+                "PNG" to BrutGreen,
+                "JPEG" to BrutYellow,
+                "WebP" to BrutPink,
+                "GIF" to BrutPurple,
+                "BMP" to BrutOrange,
+                "PDF" to BrutBlue,
+            )
+            counts.map { (label, count) ->
+                PieSlice(label, count.toFloat(), colorMap[label] ?: BrutGrey)
+            }
+        }
+    }
 
     fun loadSelection(uris: List<Uri>) {
         if (uris.isEmpty()) return
@@ -318,6 +337,7 @@ private fun FileConverterScreen(
                 docBusy = docBusy,
                 pdfBusy = pdfBusy,
                 convertedCount = convertedCount,
+                pieChartSlices = pieChartSlices,
                 onMenu = { showSettings = true },
                 onOpenLibrary = { showRecent = true },
                 onFieldClick = {

@@ -1,5 +1,7 @@
 package com.example.fileconverter
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -325,20 +328,14 @@ data class PieSlice(
 
 /**
  * Neo-brutalist donut pie chart with an inline legend.
- * Template data is used by default; pass [slices] to customise.
+ * Shows selected file format distribution; placeholder when nothing is selected.
  */
 @Composable
 fun NeoPieChart(
     modifier: Modifier = Modifier,
-    slices: List<PieSlice> = listOf(
-        PieSlice("PDF", 35f, BrutBlue),
-        PieSlice("PNG", 45f, Color(0xFF2563EB)),
-        PieSlice("JPEG", 20f, Color(0xFF60A5FA)),
-    ),
+    slices: List<PieSlice> = emptyList(),
 ) {
     val chartBg = Color(0xFFE8CFA0)
-    val shape = RoundedCornerShape(18.dp)
-    val border = 3.dp
 
     NeoCard(
         modifier = modifier,
@@ -346,39 +343,55 @@ fun NeoPieChart(
         cornerRadius = 18.dp,
         shadowOffset = 6.dp,
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            // Donut chart
-            DonutChart(
-                slices = slices,
-                modifier = Modifier.size(140.dp),
-            )
-            Spacer(modifier = Modifier.width(20.dp))
-            // Legend
-            Column(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+        if (slices.isEmpty()) {
+            // Empty state placeholder
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                slices.forEach { slice ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(14.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(slice.color)
-                                .border(2.dp, BrutBlack, RoundedCornerShape(3.dp)),
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = slice.label,
-                            color = BrutBlack,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                Text(
+                    text = "Select files to see format distribution",
+                    color = BrutMuted,
+                    fontSize = 14.sp,
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                // Donut chart
+                DonutChart(
+                    slices = slices,
+                    modifier = Modifier.size(140.dp),
+                )
+                Spacer(modifier = Modifier.width(20.dp))
+                // Legend with counts
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    slices.forEach { slice ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(slice.color)
+                                    .border(2.dp, BrutBlack, RoundedCornerShape(3.dp)),
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "${slice.label} (${slice.value.toInt()})",
+                                color = BrutBlack,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
                     }
                 }
             }
@@ -386,7 +399,7 @@ fun NeoPieChart(
     }
 }
 
-/** Canvas-based donut chart. */
+/** Canvas-based donut chart with grow-in animation. */
 @Composable
 private fun DonutChart(
     slices: List<PieSlice>,
@@ -396,6 +409,12 @@ private fun DonutChart(
     val total = slices.sumOf { it.value.toDouble() }.toFloat()
     if (total <= 0f) return
 
+    val animProgress = remember { Animatable(0f) }
+    LaunchedEffect(slices) {
+        animProgress.snapTo(0f)
+        animProgress.animateTo(1f, animationSpec = tween(durationMillis = 700))
+    }
+
     Canvas(modifier = modifier) {
         val stroke = strokeWidth.toPx()
         val diameter = minOf(size.width, size.height) - stroke
@@ -404,10 +423,11 @@ private fun DonutChart(
             (size.height - diameter) / 2f,
         )
         val arcSize = Size(diameter, diameter)
+        val progress = animProgress.value
 
         var startAngle = -90f
         slices.forEach { slice ->
-            val sweep = (slice.value / total) * 360f
+            val sweep = (slice.value / total) * 360f * progress
             drawArc(
                 color = slice.color,
                 startAngle = startAngle,
@@ -417,7 +437,7 @@ private fun DonutChart(
                 size = arcSize,
                 style = Stroke(width = stroke, cap = StrokeCap.Butt),
             )
-            startAngle += sweep
+            startAngle += sweep + 2f // re-add gap so next arc starts correctly
         }
     }
 }

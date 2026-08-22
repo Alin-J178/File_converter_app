@@ -68,6 +68,7 @@ internal fun MainScreen(
     docBusy: Boolean,
     pdfBusy: Boolean,
     convertedCount: Int,
+    pieChartSlices: List<PieSlice>,
     onMenu: () -> Unit,
     onOpenLibrary: () -> Unit,
     onFieldClick: () -> Unit,
@@ -104,7 +105,7 @@ internal fun MainScreen(
         }
 
         // Pie chart — file format distribution
-        NeoPieChart(modifier = Modifier.fillMaxWidth())
+        NeoPieChart(slices = pieChartSlices, modifier = Modifier.fillMaxWidth())
 
         // File selection row
         Row(
