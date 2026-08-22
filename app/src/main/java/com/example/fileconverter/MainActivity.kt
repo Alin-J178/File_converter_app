@@ -1,9 +1,12 @@
 package com.example.fileconverter
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -11,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -122,10 +126,48 @@ private fun FileConverterScreen(
     val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
     var showTutorial by remember { mutableStateOf(!prefs.getBoolean("tutorial_done", false)) }
 
-    // Pie-chart slices derived from saved files on the phone
+    // Device-wide file counts from MediaStore (images + PDFs on the whole phone)
+    var deviceFileCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+
+    // Runtime permission for reading media files on the device
+    val mediaPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Manifest.permission.READ_MEDIA_IMAGES
+    } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+    val hasMediaPermission = ContextCompat.checkSelfPermission(context, mediaPermission) == PackageManager.PERMISSION_GRANTED
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            // Re-query device file counts when permission is newly granted
+            scope.launch {
+                deviceFileCounts = withContext(Dispatchers.IO) {
+                    queryDeviceFileCounts(context)
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (!hasMediaPermission) {
+            permissionLauncher.launch(mediaPermission)
+        }
+    }
+    LaunchedEffect(hasMediaPermission) {
+        if (hasMediaPermission) {
+            deviceFileCounts = withContext(Dispatchers.IO) {
+                queryDeviceFileCounts(context)
+            }
+        }
+    }
+
+    // Pie-chart slices: merge device-wide counts with app converted file counts
     val pieChartSlices by remember {
         derivedStateOf {
-            val counts = countFormatsByExtension(recentFiles)
+            val appCounts = countFormatsByExtension(recentFiles)
+            // Merge: device-wide counts + app converted file counts
+            val merged = deviceFileCounts.toMutableMap()
+            for ((label, count) in appCounts) {
+                merged[label] = (merged[label] ?: 0) + count
+            }
             val colorMap = mapOf(
                 "PNG" to BrutGreen,
                 "JPEG" to BrutYellow,
@@ -134,7 +176,7 @@ private fun FileConverterScreen(
                 "BMP" to BrutOrange,
                 "PDF" to BrutBlue,
             )
-            counts.map { (label, count) ->
+            merged.filter { it.value > 0 }.map { (label, count) ->
                 PieSlice(label, count.toFloat(), colorMap[label] ?: BrutGrey)
             }
         }
