@@ -89,14 +89,246 @@ object ImageConverter {
      */
     fun renderThumbnail(context: Context, uri: Uri, name: String, maxDim: Int = 128): Bitmap? {
         return try {
-            if (name.endsWith(".pdf", ignoreCase = true)) {
-                renderPdfPage(context, uri, page = 0, maxDim = maxDim)
-            } else {
-                decodeSampledBitmap(context, uri, maxDim = maxDim)
+            when {
+                name.endsWith(".pdf", ignoreCase = true) ->
+                    renderPdfPage(context, uri, page = 0, maxDim = maxDim)
+                name.endsWith(".tiff", ignoreCase = true) || name.endsWith(".tif", ignoreCase = true) ->
+                    decodeTiff(context, uri, maxDim)
+                else ->
+                    decodeSampledBitmap(context, uri, maxDim = maxDim)
             }
         } catch (e: Exception) {
             null
         }
+    }
+
+    /**
+     * Decodes a TIFF file (Baseline TIFF, LE byte order, uncompressed RGB or grayscale)
+     * from [uri] into a Bitmap, scaled down to [maxDim].
+     */
+    private fun decodeTiff(context: Context, uri: Uri, maxDim: Int = 4096): Bitmap? {
+        val input = context.contentResolver.openInputStream(uri) ?: return null
+        return input.use { stream ->
+            val data = stream.readBytes()
+            if (data.size < 8) return null
+
+            // Verify byte order: must be "II" (little-endian)
+            if (data[0] != 0x49.toByte() || data[1] != 0x49.toByte()) return null
+
+            // Magic number at offset 2-3 must be 42
+            val magic = (data[2].toInt() and 0xFF) or ((data[3].toInt() and 0xFF) shl 8)
+            if (magic != 42) return null
+
+            // IFD offset at offset 4-7
+            val ifdOffset = readUInt32LE(data, 4)
+            if (ifdOffset + 2 > data.size) return null
+
+            // Read tag count
+            val numTags = readUInt16LE(data, ifdOffset.toInt())
+
+            // Parse IFD tags
+            var width = 0
+            var height = 0
+            var compression = 1 // default: uncompressed
+            var photometric = 0
+            var stripOffsets = intArrayOf()
+            var stripByteCounts = intArrayOf()
+            var samplesPerPixel = 1
+            var bitsPerSample = intArrayOf(8)
+            var rowsPerStrip = 0
+            var planarConfig = 1
+
+            var tagOffset = ifdOffset.toInt() + 2
+            for (i in 0 until numTags) {
+                if (tagOffset + 12 > data.size) break
+                val tagId = readUInt16LE(data, tagOffset)
+                val tagType = readUInt16LE(data, tagOffset + 2)
+                val tagCount = readUInt32LE(data, tagOffset + 4)
+
+                // Read the value (inline if <= 4 bytes, else offset)
+                val valueBytes = getTagValueBytes(data, tagOffset, tagType, tagCount)
+
+                when (tagId) {
+                    256 -> width = valueBytes.toIntLE(0, 4)
+                    257 -> height = valueBytes.toIntLE(0, 4)
+                    258 -> {
+                        // BitsPerSample
+                        bitsPerSample = IntArray(tagCount.toInt())
+                        if (tagType == 3) { // SHORT
+                            for (j in 0 until tagCount.toInt()) {
+                                bitsPerSample[j] = (valueBytes[j * 2].toInt() and 0xFF) or
+                                        ((valueBytes[j * 2 + 1].toInt() and 0xFF) shl 8)
+                            }
+                        } else if (tagType == 4) { // LONG
+                            for (j in 0 until tagCount.toInt()) {
+                                bitsPerSample[j] = readUInt32LE(valueBytes, j * 4).toInt()
+                            }
+                        }
+                    }
+                    259 -> compression = valueBytes.toIntLE(0, 4)
+                    262 -> photometric = valueBytes.toIntLE(0, 4)
+                    273 -> {
+                        // StripOffsets
+                        if (tagCount == 1L) {
+                            stripOffsets = intArrayOf(valueBytes.toIntLE(0, 4))
+                        } else {
+                            stripOffsets = IntArray(tagCount.toInt()) { j ->
+                                if (tagType == 3) {
+                                    (valueBytes[j * 2].toInt() and 0xFF) or
+                                            ((valueBytes[j * 2 + 1].toInt() and 0xFF) shl 8)
+                                } else {
+                                    readUInt32LE(valueBytes, j * 4).toInt()
+                                }
+                            }
+                        }
+                    }
+                    277 -> samplesPerPixel = valueBytes.toIntLE(0, 4)
+                    278 -> rowsPerStrip = valueBytes.toIntLE(0, 4)
+                    279 -> {
+                        // StripByteCounts
+                        if (tagCount == 1L) {
+                            stripByteCounts = intArrayOf(valueBytes.toIntLE(0, 4))
+                        } else {
+                            stripByteCounts = IntArray(tagCount.toInt()) { j ->
+                                if (tagType == 3) {
+                                    (valueBytes[j * 2].toInt() and 0xFF) or
+                                            ((valueBytes[j * 2 + 1].toInt() and 0xFF) shl 8)
+                                } else {
+                                    readUInt32LE(valueBytes, j * 4).toInt()
+                                }
+                            }
+                        }
+                    }
+                    284 -> planarConfig = valueBytes.toIntLE(0, 4)
+                }
+                tagOffset += 12
+            }
+
+            if (width <= 0 || height <= 0) return null
+            if (compression != 1) return null // only support uncompressed for now
+            if (rowsPerStrip <= 0) rowsPerStrip = height
+            if (stripOffsets.isEmpty()) return null
+
+            // Compute bytes per pixel
+            val bytesPerPixel = when {
+                bitsPerSample.size >= 3 -> {
+                    val bps = bitsPerSample[0] + bitsPerSample[1] + bitsPerSample[2]
+                    (bps + 7) / 8
+                }
+                bitsPerSample[0] == 8 && samplesPerPixel >= 3 -> 3
+                bitsPerSample[0] == 8 && samplesPerPixel == 1 -> 1
+                else -> samplesPerPixel * ((bitsPerSample[0] + 7) / 8)
+            }
+
+            // Create output bitmap
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val pixels = IntArray(width * height)
+
+            // Decode pixel data
+            for (stripIdx in stripOffsets.indices) {
+                val stripOffset = stripOffsets[stripIdx]
+                val stripBytes = if (stripIdx < stripByteCounts.size) stripByteCounts[stripIdx] else 0
+                if (stripOffset + stripBytes > data.size) continue
+
+                val rowsInStrip = minOf(rowsPerStrip, height - stripIdx * rowsPerStrip)
+                val rowBytes = width * bytesPerPixel
+
+                for (row in 0 until rowsInStrip) {
+                    val y = stripIdx * rowsPerStrip + row
+                    if (y >= height) break
+                    val rowOffset = stripOffset + row * rowBytes
+
+                    for (x in 0 until width) {
+                        val pixOffset = rowOffset + x * bytesPerPixel
+                        if (pixOffset + bytesPerPixel > data.size) break
+
+                        val pixel = when {
+                            // RGB (3 bytes per pixel)
+                            bytesPerPixel == 3 && photometric == 2 -> {
+                                val r = data[pixOffset].toInt() and 0xFF
+                                val g = data[pixOffset + 1].toInt() and 0xFF
+                                val b = data[pixOffset + 2].toInt() and 0xFF
+                                (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+                            }
+                            // RGB (3 bytes per pixel) with MinIsBlack (invert)
+                            bytesPerPixel == 3 && photometric == 1 -> {
+                                val r = 255 - (data[pixOffset].toInt() and 0xFF)
+                                val g = 255 - (data[pixOffset + 1].toInt() and 0xFF)
+                                val b = 255 - (data[pixOffset + 2].toInt() and 0xFF)
+                                (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+                            }
+                            // Grayscale (1 byte per pixel)
+                            bytesPerPixel == 1 && photometric == 1 -> {
+                                val v = data[pixOffset].toInt() and 0xFF
+                                (0xFF shl 24) or (v shl 16) or (v shl 8) or v
+                            }
+                            // Grayscale MinIsWhite
+                            bytesPerPixel == 1 && photometric == 0 -> {
+                                val v = 255 - (data[pixOffset].toInt() and 0xFF)
+                                (0xFF shl 24) or (v shl 16) or (v shl 8) or v
+                            }
+                            else -> 0
+                        }
+                        pixels[y * width + x] = pixel
+                    }
+                }
+            }
+
+            bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+
+            // Scale down if needed
+            val scale = computeSampleSize(width, height, maxDim)
+            if (scale > 1) {
+                val scaled = Bitmap.createScaledBitmap(bitmap, width / scale, height / scale, true)
+                bitmap.recycle()
+                scaled
+            } else {
+                bitmap
+            }
+        }
+    }
+
+    /** Reads a LE uint16 from [data] at [offset]. */
+    private fun readUInt16LE(data: ByteArray, offset: Int): Int {
+        return (data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)
+    }
+
+    /** Reads a LE uint32 from [data] at [offset]. */
+    private fun readUInt32LE(data: ByteArray, offset: Int): Long {
+        return (data[offset].toInt() and 0xFF).toLong() or
+                ((data[offset + 1].toInt() and 0xFF).toLong() shl 8) or
+                ((data[offset + 2].toInt() and 0xFF).toLong() shl 16) or
+                ((data[offset + 3].toInt() and 0xFF).toLong() shl 24)
+    }
+
+    /** Extracts the tag value bytes from an IFD entry. */
+    private fun getTagValueBytes(data: ByteArray, tagOffset: Int, tagType: Int, tagCount: Long): ByteArray {
+        val totalBytes = tagCount.toInt() * when (tagType) {
+            1 -> 1 // BYTE
+            2 -> 1 // ASCII
+            3 -> 2 // SHORT
+            4 -> 4 // LONG
+            5 -> 8 // RATIONAL
+            else -> 1
+        }
+        return if (totalBytes <= 4) {
+            // Value is inline
+            data.copyOfRange(tagOffset + 8, tagOffset + 12)
+        } else {
+            // Value is at an offset
+            val offset = readUInt32LE(data, tagOffset + 8).toInt()
+            if (offset + totalBytes > data.size) ByteArray(totalBytes)
+            else data.copyOfRange(offset, offset + totalBytes)
+        }
+    }
+
+    /** Interprets [bytes] as a LE integer of [len] bytes (up to 4). */
+    private fun ByteArray.toIntLE(byteOffset: Int, len: Int): Int {
+        var result = 0
+        for (i in 0 until minOf(len, 4)) {
+            result = result or ((this[byteOffset + i].toInt() and 0xFF) shl (i * 8))
+        }
+        return result
     }
 
     /** Renders [page] of the PDF at [uri] as a bitmap (index 0 = first page), scaled to [maxDim]. */
@@ -552,21 +784,141 @@ object ImageConverter {
     }
 
     /**
-     * Saves [bitmap] as an uncompressed TIFF (Baseline TIFF, Little-Endian, RGB24).
+     * Saves [bitmap] as an uncompressed TIFF (Baseline TIFF 6.0, Little-Endian, RGB24).
+     * Uses ByteBuffer for explicit byte-order control, builds the entire file in memory,
+     * then writes atomically to MediaStore.
      */
     private fun saveAsTiff(context: Context, bitmap: Bitmap, displayName: String): Uri {
         val width = bitmap.width
         val height = bitmap.height
-        val bytesPerRow = width * 3
-        val rowStride = (bytesPerRow + 1) and 1.inv()
-        val stripDataSize = rowStride * height
 
+        // Flatten alpha: draw onto white background so every pixel is fully opaque
+        val opaque = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(opaque)
+        canvas.drawColor(Color.WHITE)
+        canvas.drawBitmap(bitmap, 0f, 0f, null)
+
+        // Get all pixels at once (premultiplied ARGB_8888)
+        val pixels = IntArray(width * height)
+        opaque.getPixels(pixels, 0, width, 0, 0, width, height)
+
+        // Debug: log first few source bitmap ARGB values
+        android.util.Log.d("TIFFEncoder", "=== TIFF ENCODE START ===")
+        android.util.Log.d("TIFFEncoder", "Image: ${width}x${height}")
+        for (i in 0 until minOf(5, pixels.size)) {
+            val p = pixels[i]
+            android.util.Log.d("TIFFEncoder",
+                "  src pixel[$i] ARGB=0x${String.format("%08X", p)} " +
+                "R=${(p shr 16) and 0xFF} G=${(p shr 8) and 0xFF} B=${p and 0xFF} A=${(p shr 24) and 0xFF}")
+        }
+
+        // Build RGB byte array — NO row padding (TIFF doesn't pad rows)
+        val rgbData = ByteArray(width * height * 3)
+        var idx = 0
+        for (pixel in pixels) {
+            rgbData[idx++] = ((pixel shr 16) and 0xFF).toByte() // R
+            rgbData[idx++] = ((pixel shr 8) and 0xFF).toByte()  // G
+            rgbData[idx++] = (pixel and 0xFF).toByte()           // B
+        }
+        opaque.recycle()
+
+        // Debug: verify first few RGB bytes written
+        for (i in 0 until minOf(6, rgbData.size) step 3) {
+            android.util.Log.d("TIFFEncoder",
+                "  rgb byte[$i..${i + 2}] = R=${rgbData[i].toInt() and 0xFF} " +
+                "G=${rgbData[i + 1].toInt() and 0xFF} B=${rgbData[i + 2].toInt() and 0xFF}")
+        }
+
+        // TIFF file layout:
+        //   Header (8) + IFD (126) + PixelData + BitsPerSample (6)
         val numTags = 10
-        val ifdSize = 2 + numTags * 12 + 4
-        val stripOffset = 8 + ifdSize
-        val bpsOffset = stripOffset + stripDataSize
+        val headerSize = 8
+        val ifdSize = 2 + numTags * 12 + 4   // count(2) + entries(120) + nextIFD(4) = 126
+        val ifdOffset = headerSize             // 8
+        val pixelDataOffset = headerSize + ifdSize  // 134
+        val bpsDataOffset = pixelDataOffset + rgbData.size
+        val totalFileSize = bpsDataOffset + 6   // 3 SHORTs = 6 bytes
 
-        // Write directly to MediaStore output stream
+        android.util.Log.d("TIFFEncoder",
+            "Layout: header=$headerSize ifd=$ifdSize pixelOff=$pixelDataOffset " +
+            "bpsOff=$bpsDataOffset total=$totalFileSize rgbBytes=${rgbData.size}")
+
+        // Build TIFF in a ByteBuffer (little-endian)
+        val buf = java.nio.ByteBuffer.allocate(totalFileSize)
+            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+
+        // --- 8-byte Header ---
+        buf.put(0x49.toByte()) // 'I' — byte order: little-endian
+        buf.put(0x49.toByte()) // 'I' — byte order: little-endian
+        buf.putShort(42)       // TIFF magic number
+        buf.putInt(ifdOffset)  // Offset to first (and only) IFD
+
+        // --- IFD (10 tags, must be sorted by tag ID ascending) ---
+        buf.putShort(numTags.toShort())
+
+        // Helper: write a SHORT-type IFD entry (type=3)
+        fun shortTag(id: Int, count: Int, value: Int) {
+            buf.putShort(id.toShort())       // Tag ID
+            buf.putShort(3)                   // Type = SHORT (3)
+            buf.putInt(count)                 // Count
+            // For SHORT with count=1: value in first 2 bytes, next 2 zero
+            // For SHORT with count>2: value field is offset (4 bytes)
+            buf.putInt(value)                 // Value or offset
+        }
+
+        // Helper: write a LONG-type IFD entry (type=4)
+        fun longTag(id: Int, count: Int, value: Int) {
+            buf.putShort(id.toShort())       // Tag ID
+            buf.putShort(4)                   // Type = LONG (4)
+            buf.putInt(count)                 // Count
+            buf.putInt(value)                 // Value or offset
+        }
+
+        shortTag(256, 1, width)                     // ImageWidth
+        shortTag(257, 1, height)                    // ImageLength
+        shortTag(258, 3, bpsDataOffset)             // BitsPerSample → offset to [8,8,8]
+        shortTag(259, 1, 1)                         // Compression = None
+        shortTag(262, 1, 2)                         // PhotometricInterpretation = RGB
+        longTag(273, 1, pixelDataOffset)            // StripOffsets
+        shortTag(277, 1, 3)                         // SamplesPerPixel = 3
+        longTag(278, 1, height)                     // RowsPerStrip (LONG to avoid overflow)
+        longTag(279, 1, rgbData.size)               // StripByteCounts
+        shortTag(284, 1, 1)                         // PlanarConfiguration = Chunky
+
+        buf.putInt(0) // Next IFD offset (0 = no more IFDs)
+
+        // --- Pixel data (RGB chunky, no row padding) ---
+        buf.put(rgbData)
+
+        // --- BitsPerSample data: 3 SHORT values = [8, 8, 8] ---
+        buf.putShort(8)
+        buf.putShort(8)
+        buf.putShort(8)
+
+        val tiffBytes = buf.array()
+
+        // Debug: verify final file bytes
+        android.util.Log.d("TIFFEncoder",
+            "Header: [${tiffBytes[0].toInt() and 0xFF}, ${tiffBytes[1].toInt() and 0xFF}] " +
+            "magic=${tiffBytes[2].toInt() and 0xFF},${tiffBytes[3].toInt() and 0xFF}")
+        // First RGB pixel at pixelDataOffset
+        if (tiffBytes.size > pixelDataOffset + 2) {
+            android.util.Log.d("TIFFEncoder",
+                "First pixel RGB: R=${tiffBytes[pixelDataOffset].toInt() and 0xFF} " +
+                "G=${tiffBytes[pixelDataOffset + 1].toInt() and 0xFF} " +
+                "B=${tiffBytes[pixelDataOffset + 2].toInt() and 0xFF}")
+        }
+        // BPS values
+        if (tiffBytes.size > bpsDataOffset + 5) {
+            android.util.Log.d("TIFFEncoder",
+                "BPS bytes: [${tiffBytes[bpsDataOffset].toInt() and 0xFF}, " +
+                "${tiffBytes[bpsDataOffset + 2].toInt() and 0xFF}, " +
+                "${tiffBytes[bpsDataOffset + 4].toInt() and 0xFF}]")
+        }
+        android.util.Log.d("TIFFEncoder", "Total file size: ${tiffBytes.size} bytes")
+        android.util.Log.d("TIFFEncoder", "=== TIFF ENCODE END ===")
+
+        // Write entire TIFF atomically to MediaStore
         val resolver = context.contentResolver
         val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
@@ -583,60 +935,7 @@ object ImageConverter {
             Uri.fromFile(File(dir, displayName))
         }
 
-        resolver.openOutputStream(uri)!!.use { raw ->
-            val w = java.io.DataOutputStream(raw)
-
-            // Header
-            w.writeByte(0x49); w.writeByte(0x4D) // "II" LE
-            writeShortLE(w, 42) // TIFF magic — must be LE!
-            writeIntLE(w, 8) // IFD offset
-
-            // IFD
-            writeShortLE(w, numTags)
-
-            fun tag(t: Int, typ: Int, cnt: Int, v: Int) {
-                writeShortLE(w, t)
-                writeShortLE(w, typ)
-                writeIntLE(w, cnt)
-                writeIntLE(w, v)
-            }
-
-            tag(256, 3, 1, width)           // ImageWidth  (SHORT)
-            tag(257, 3, 1, height)          // ImageLength (SHORT)
-            tag(258, 3, 3, bpsOffset)       // BitsPerSample -> offset to 3 SHORTs
-            tag(259, 3, 1, 1)               // Compression = None (SHORT)
-            tag(262, 3, 1, 2)               // Photometric = RGB (SHORT)
-            tag(273, 4, 1, stripOffset)     // StripOffsets (LONG)
-            tag(277, 3, 1, 3)               // SamplesPerPixel = 3 (SHORT)
-            tag(278, 3, 1, height.coerceAtMost(65535)) // RowsPerStrip (SHORT)
-            tag(279, 4, 1, stripDataSize)   // StripByteCounts (LONG)
-            tag(284, 3, 1, 1)               // PlanarConfig = Chunky (SHORT)
-            writeIntLE(w, 0)                // no next IFD
-
-            // Pixel data — one strip, RGB interleaved, rows padded to even
-            val px = IntArray(width)
-            val row = ByteArray(rowStride)
-            for (y in 0 until height) {
-                bitmap.getPixels(px, 0, width, 0, y, width, 1)
-                var i = 0
-                for (x in 0 until width) {
-                    val c = px[x]
-                    row[i++] = ((c shr 16) and 0xFF).toByte()
-                    row[i++] = ((c shr 8) and 0xFF).toByte()
-                    row[i++] = (c and 0xFF).toByte()
-                }
-                while (i < rowStride) row[i++] = 0
-                w.write(row)
-            }
-
-            // BitsPerSample data: 3 x SHORT(8) = 6 bytes (padded to 8 for alignment)
-            writeShortLE(w, 8)
-            writeShortLE(w, 8)
-            writeShortLE(w, 8)
-            writeShortLE(w, 0) // pad to word boundary
-
-            w.flush()
-        }
+        resolver.openOutputStream(uri)!!.use { it.write(tiffBytes) }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)

@@ -288,6 +288,7 @@ private fun FileTile(
         "GIF" -> BrutPurple
         "BMP" -> BrutOrange
         "PDF" -> BrutPink
+        "TIFF", "TIF" -> BrutBrown
         else -> BrutMuted
     }
 

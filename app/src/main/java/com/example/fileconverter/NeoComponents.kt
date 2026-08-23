@@ -71,6 +71,7 @@ val BrutGrey = Color(0xFFBDBDBD)
 val BrutBlue = Color(0xFF4D96FF)
 val BrutOrange = Color(0xFFFF9F1C)
 val BrutMuted = Color(0xFF7A7A7A)
+val BrutBrown = Color(0xFF8B6914)
 
 private val NeoBorder = 3.dp
 
