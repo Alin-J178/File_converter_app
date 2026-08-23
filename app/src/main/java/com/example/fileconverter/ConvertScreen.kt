@@ -31,8 +31,8 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,7 +42,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -52,15 +51,24 @@ import androidx.compose.ui.unit.sp
 fun ConvertScreen(
     onBack: () -> Unit,
     onSelectImage: () -> Unit,
+    onSelectDocument: () -> Unit,
     showImagePicker: Boolean = false,
+    showDocPicker: Boolean = false,
     onImagePickerDismiss: () -> Unit = {},
+    onDocPickerDismiss: () -> Unit = {},
     pickedImageBitmaps: List<android.graphics.Bitmap> = emptyList(),
+    pickedDocBitmaps: List<android.graphics.Bitmap> = emptyList(),
+    pickedDocNames: List<String> = emptyList(),
     onRemoveImage: (Int) -> Unit = {},
+    onRemoveDoc: (Int) -> Unit = {},
     onPickImages: () -> Unit = {},
+    onPickDocs: () -> Unit = {},
     selectedFormat: OutputFormat? = null,
     onFormatSelected: (OutputFormat) -> Unit = {},
     onRun: () -> Unit = {},
+    onDocRun: () -> Unit = {},
     busy: Boolean = false,
+    docBusy: Boolean = false,
 ) {
     Box(
         modifier = Modifier
@@ -117,14 +125,13 @@ fun ConvertScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Placeholder: Document
+            // Document conversion card
             ConvertCategoryCard(
                 icon = Icons.Filled.Description,
-                iconBg = BrutGrey.copy(alpha = 0.3f),
+                iconBg = BrutBlue,
                 title = "Document",
-                subtitle = "Coming soon",
-                enabled = false,
-                onClick = {},
+                subtitle = "Word, Images \u00b7 PDF",
+                onClick = onSelectDocument,
             )
         }
 
@@ -139,6 +146,19 @@ fun ConvertScreen(
                 onFormatSelected = onFormatSelected,
                 onRun = onRun,
                 busy = busy,
+            )
+        }
+
+        // Document conversion overlay
+        if (showDocPicker) {
+            DocConvertOverlay(
+                onDismiss = onDocPickerDismiss,
+                pickedBitmaps = pickedDocBitmaps,
+                pickedNames = pickedDocNames,
+                onRemoveItem = onRemoveDoc,
+                onPickDocs = onPickDocs,
+                onRun = onDocRun,
+                busy = docBusy,
             )
         }
     }
@@ -262,10 +282,6 @@ private fun ImageConvertOverlay(
                     }
                 }
 
-                // Close button (top-right corner of card)
-                // Actually let's put it as a small X at the top right
-                // We'll handle dismiss via scrim click instead
-
                 // Format buttons
                 val formats = listOf(
                     OutputFormat.PNG to BrutGreen,
@@ -316,6 +332,201 @@ private fun ImageConvertOverlay(
 
                 // Run button (fixed at bottom)
                 val runEnabled = selectedFormat != null && pickedBitmaps.isNotEmpty() && !busy
+                val runBg = if (runEnabled) BrutGreen else BrutGrey.copy(alpha = 0.4f)
+                val runBorder = if (runEnabled) BrutBlack else BrutGrey
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(buttonShape)
+                        .background(runBg)
+                        .border(2.dp, runBorder, buttonShape)
+                        .clickable(enabled = runEnabled) { onRun() }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (busy) "Converting..." else "Run",
+                        color = BrutBlack,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DocConvertOverlay(
+    onDismiss: () -> Unit,
+    pickedBitmaps: List<android.graphics.Bitmap>,
+    pickedNames: List<String>,
+    onRemoveItem: (Int) -> Unit,
+    onPickDocs: () -> Unit,
+    onRun: () -> Unit,
+    busy: Boolean,
+) {
+    val cardShape = RoundedCornerShape(20.dp)
+    val buttonShape = RoundedCornerShape(12.dp)
+    val blueBg = Color(0xFF5B9BD5)
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Dim scrim
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0x66000000))
+                .clickable { onDismiss() },
+        )
+
+        // Overlay card
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(horizontal = 28.dp)
+                .clip(cardShape)
+                .background(blueBg)
+                .border(3.dp, BrutBlack, cardShape)
+                .clickable(enabled = false) { /* consume clicks */ }
+                .padding(16.dp),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // Select document/image button
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(buttonShape)
+                        .background(Color.White)
+                        .border(2.dp, BrutBlack, buttonShape)
+                        .clickable { onPickDocs() }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.InsertDriveFile,
+                            contentDescription = null,
+                            tint = BrutBlack,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Select Document/Image",
+                            color = BrutBlack,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+
+                // Preview strip
+                if (pickedBitmaps.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp)
+                            .clip(buttonShape)
+                            .background(Color.White.copy(alpha = 0.5f))
+                            .border(2.dp, BrutBlack, buttonShape)
+                            .padding(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            pickedBitmaps.forEachIndexed { index, bitmap ->
+                                Box {
+                                    Image(
+                                        bitmap = bitmap.asImageBitmap(),
+                                        contentDescription = "Preview",
+                                        modifier = Modifier
+                                            .size(104.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .border(2.dp, BrutBlack, RoundedCornerShape(8.dp)),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                    // X button to remove
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(4.dp)
+                                            .size(22.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(BrutBlack.copy(alpha = 0.7f))
+                                            .clickable { onRemoveItem(index) },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            contentDescription = "Remove",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                    }
+                                    // File name label at bottom
+                                    if (index < pickedNames.size) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomCenter)
+                                                .fillMaxWidth()
+                                                .background(BrutBlack.copy(alpha = 0.6f))
+                                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                text = pickedNames[index].take(12) + if (pickedNames[index].length > 12) "..." else "",
+                                                color = Color.White,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // PDF format button (only option)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(buttonShape)
+                        .background(BrutBlue)
+                        .border(2.dp, BrutBlack, buttonShape)
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "PDF",
+                            color = BrutBlack,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = "Selected",
+                            tint = BrutBlack,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Run button
+                val runEnabled = pickedBitmaps.isNotEmpty() && !busy
                 val runBg = if (runEnabled) BrutGreen else BrutGrey.copy(alpha = 0.4f)
                 val runBorder = if (runEnabled) BrutBlack else BrutGrey
 

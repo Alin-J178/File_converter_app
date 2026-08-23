@@ -117,6 +117,11 @@ private fun FileConverterScreen(
     var pickedImageBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var selectedConvertFormat by remember { mutableStateOf<OutputFormat?>(null) }
     var convertBusy by remember { mutableStateOf(false) }
+    var showDocPicker by remember { mutableStateOf(false) }
+    var pickedDocUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var pickedDocBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+    var pickedDocNames by remember { mutableStateOf<List<String>>(emptyList()) }
+    var docConvertBusy by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
     var showRecent by remember { mutableStateOf(false) }
     var recentFiles by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
@@ -317,6 +322,27 @@ private fun FileConverterScreen(
         }
     }
 
+    // Document picker for the Convert screen — accepts both documents and images
+    val pickConvertDocs = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            pickedDocUris = uris
+            scope.launch {
+                val info = uris.mapNotNull { uri ->
+                    runCatching {
+                        val name = ImageConverter.queryDisplayName(context, uri)
+                        val bmp = ImageConverter.renderThumbnail(context, uri, name, maxDim = 200)
+                            ?: ImageConverter.createPlaceholder(name)
+                        name to bmp
+                    }.getOrNull()
+                }
+                pickedDocNames = info.map { it.first }
+                pickedDocBitmaps = info.map { it.second }
+            }
+        }
+    }
+
     LaunchedEffect(sharedUris) {
         val uris = sharedUris
         if (!uris.isNullOrEmpty()) {
@@ -472,11 +498,16 @@ private fun FileConverterScreen(
 
         if (showConvertScreen) {
             ConvertScreen(
-                onBack = { showConvertScreen = false; showImagePicker = false },
+                onBack = { showConvertScreen = false; showImagePicker = false; showDocPicker = false },
                 onSelectImage = { showImagePicker = true },
+                onSelectDocument = { showDocPicker = true },
                 showImagePicker = showImagePicker,
+                showDocPicker = showDocPicker,
                 onImagePickerDismiss = { showImagePicker = false },
+                onDocPickerDismiss = { showDocPicker = false },
                 pickedImageBitmaps = pickedImageBitmaps,
+                pickedDocBitmaps = pickedDocBitmaps,
+                pickedDocNames = pickedDocNames,
                 onRemoveImage = { index ->
                     if (index in pickedImageUris.indices) {
                         pickedImageUris = pickedImageUris.toMutableList().apply { removeAt(index) }
@@ -485,7 +516,19 @@ private fun FileConverterScreen(
                         pickedImageBitmaps = pickedImageBitmaps.toMutableList().apply { removeAt(index) }
                     }
                 },
+                onRemoveDoc = { index ->
+                    if (index in pickedDocUris.indices) {
+                        pickedDocUris = pickedDocUris.toMutableList().apply { removeAt(index) }
+                    }
+                    if (index in pickedDocBitmaps.indices) {
+                        pickedDocBitmaps = pickedDocBitmaps.toMutableList().apply { removeAt(index) }
+                    }
+                    if (index in pickedDocNames.indices) {
+                        pickedDocNames = pickedDocNames.toMutableList().apply { removeAt(index) }
+                    }
+                },
                 onPickImages = { pickConvertImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onPickDocs = { pickConvertDocs.launch(arrayOf("application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/*")) },
                 selectedFormat = selectedConvertFormat,
                 onFormatSelected = { format ->
                     selectedConvertFormat = format
@@ -508,6 +551,7 @@ private fun FileConverterScreen(
                     }
                 },
                 busy = convertBusy,
+                docBusy = docConvertBusy,
                 onRun = {
                     val format = selectedConvertFormat ?: return@ConvertScreen
                     val uris = pickedImageUris
@@ -536,6 +580,49 @@ private fun FileConverterScreen(
                         pickedImageBitmaps = emptyList()
                         selectedConvertFormat = null
                         convertBusy = false
+                        showConvertScreen = false
+                    }
+                },
+                onDocRun = {
+                    val uris = pickedDocUris
+                    if (uris.isEmpty() || docConvertBusy) return@ConvertScreen
+                    docConvertBusy = true
+                    showDocPicker = false
+                    scope.launch {
+                        val converted = mutableListOf<ConversionResult>()
+                        for (uri in uris) {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    val mimeType = context.contentResolver.getType(uri) ?: ""
+                                    if (mimeType == "image/jpeg" || mimeType == "image/png" || mimeType == "image/webp" || mimeType == "image/gif" || mimeType == "image/bmp") {
+                                        // Image -> PDF
+                                        ImageConverter.convert(context, uri, OutputFormat.PDF, quality = quality.toInt(), scalePercent = scalePercent)
+                                    } else if (mimeType == "application/pdf") {
+                                        // PDF -> compressed PDF
+                                        val name = "compressed_${System.currentTimeMillis()}.pdf"
+                                        val outUri = ImageConverter.compressPdf(context, uri, quality = quality.toInt(), scalePercent = scalePercent, displayName = name)
+                                        ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                    } else {
+                                        // Word doc -> PDF
+                                        val name = "converted_${System.currentTimeMillis()}.pdf"
+                                        val outUri = DocxToPdf.convert(context, uri, name)
+                                        ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                    }
+                                }
+                            }.onSuccess {
+                                converted.add(it)
+                            }.onFailure { e ->
+                                Toast.makeText(context, "Could not convert: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        if (converted.isNotEmpty()) {
+                            results = converted
+                            showSuccess = true
+                        }
+                        pickedDocUris = emptyList()
+                        pickedDocBitmaps = emptyList()
+                        pickedDocNames = emptyList()
+                        docConvertBusy = false
                         showConvertScreen = false
                     }
                 },
