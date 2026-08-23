@@ -8,12 +8,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -47,7 +51,9 @@ fun ConvertScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp)
+                .padding(horizontal = 20.dp)
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(top = 16.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
             // Top bar
@@ -121,30 +127,30 @@ private fun ConvertCategoryCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(cardBg)
-            .border(3.dp, borderColor, RoundedCornerShape(16.dp))
+            .border(3.dp, borderColor, RoundedCornerShape(14.dp))
             .then(if (enabled) Modifier.clickable { onClick() } else Modifier)
-            .padding(18.dp),
+            .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .size(44.dp)
+                .clip(RoundedCornerShape(12.dp))
                 .background(iconBg)
-                .border(2.dp, BrutBlack, RoundedCornerShape(14.dp)),
+                .border(2.dp, BrutBlack, RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = BrutBlack, modifier = Modifier.size(26.dp))
+            Icon(icon, contentDescription = null, tint = BrutBlack, modifier = Modifier.size(22.dp))
         }
-        Spacer(modifier = Modifier.width(16.dp))
+        Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = titleColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = titleColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Text(subtitle, color = BrutMuted, fontSize = 12.sp)
         }
         if (enabled) {
-            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = BrutBlack, modifier = Modifier.size(26.dp))
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = BrutBlack, modifier = Modifier.size(22.dp))
         }
     }
 }
