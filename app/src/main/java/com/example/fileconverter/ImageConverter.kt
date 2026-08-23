@@ -666,6 +666,7 @@ object ImageConverter {
     fun recentConversions(context: Context, limit: Int = 20): List<RecentFile> {
         val results = mutableListOf<RecentFile>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val seenIds = mutableSetOf<Long>()
             fun collect(collection: Uri) {
                 val projection = arrayOf(
                     MediaStore.MediaColumns._ID,
@@ -687,11 +688,12 @@ object ImageConverter {
                     val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
                     val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
                     while (cursor.moveToNext()) {
+                        val fileId = cursor.getLong(idCol)
+                        if (!seenIds.add(fileId)) continue // skip duplicate across collections
                         results += RecentFile(
-                            uri = ContentUris.withAppendedId(collection, cursor.getLong(idCol)),
+                            uri = ContentUris.withAppendedId(collection, fileId),
                             name = cursor.getString(nameCol) ?: "file",
                             sizeBytes = cursor.getLong(sizeCol),
-                            // DATE_ADDED is Unix seconds — normalize to millis to match file.lastModified()
                             dateAdded = cursor.getLong(dateCol) * 1000L,
                         )
                     }
@@ -699,6 +701,7 @@ object ImageConverter {
             }
             collect(MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL))
             collect(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL))
+            return results.sortedByDescending { it.dateAdded }.take(limit)
         } else {
             val dirs = listOf(
                 File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "FileConverter"),
