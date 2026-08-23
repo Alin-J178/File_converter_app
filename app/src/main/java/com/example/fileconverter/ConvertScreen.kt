@@ -4,7 +4,9 @@ import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,6 +34,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -69,6 +73,8 @@ fun ConvertScreen(
     onDocRun: () -> Unit = {},
     busy: Boolean = false,
     docBusy: Boolean = false,
+    favouriteFormats: Set<OutputFormat> = emptySet(),
+    onToggleFavourite: (OutputFormat) -> Unit = {},
 ) {
     Box(
         modifier = Modifier
@@ -146,6 +152,8 @@ fun ConvertScreen(
                 onFormatSelected = onFormatSelected,
                 onRun = onRun,
                 busy = busy,
+                favouriteFormats = favouriteFormats,
+                onToggleFavourite = onToggleFavourite,
             )
         }
 
@@ -159,6 +167,8 @@ fun ConvertScreen(
                 onPickDocs = onPickDocs,
                 onRun = onDocRun,
                 busy = docBusy,
+                favouriteFormats = favouriteFormats,
+                onToggleFavourite = onToggleFavourite,
             )
         }
     }
@@ -174,6 +184,8 @@ private fun ImageConvertOverlay(
     onFormatSelected: (OutputFormat) -> Unit,
     onRun: () -> Unit,
     busy: Boolean,
+    favouriteFormats: Set<OutputFormat> = emptySet(),
+    onToggleFavourite: (OutputFormat) -> Unit = {},
 ) {
     val cardShape = RoundedCornerShape(20.dp)
     val buttonShape = RoundedCornerShape(12.dp)
@@ -291,8 +303,10 @@ private fun ImageConvertOverlay(
                     OutputFormat.BMP to BrutOrange,
                 )
 
+                @OptIn(ExperimentalFoundationApi::class)
                 formats.forEach { (format, color) ->
                     val isSelected = selectedFormat == format
+                    val isFavourite = format in favouriteFormats
                     val bgColor = if (isSelected) color else Color.White
                     val textColor = if (isSelected) BrutBlack else BrutBlack
 
@@ -302,7 +316,10 @@ private fun ImageConvertOverlay(
                             .clip(buttonShape)
                             .background(bgColor)
                             .border(2.dp, BrutBlack, buttonShape)
-                            .clickable { onFormatSelected(format) }
+                            .combinedClickable(
+                                onClick = { onFormatSelected(format) },
+                                onLongClick = { onToggleFavourite(format) },
+                            )
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                     ) {
                         Row(
@@ -316,13 +333,26 @@ private fun ImageConvertOverlay(
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                             )
-                            if (isSelected) {
-                                Icon(
-                                    Icons.Filled.Check,
-                                    contentDescription = "Selected",
-                                    tint = BrutBlack,
-                                    modifier = Modifier.size(20.dp),
-                                )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (isFavourite) {
+                                    Icon(
+                                        Icons.Filled.Favorite,
+                                        contentDescription = "Favourite",
+                                        tint = Color.Red,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                                if (isSelected) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = "Selected",
+                                        tint = BrutBlack,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
                             }
                         }
                     }
@@ -367,6 +397,8 @@ private fun DocConvertOverlay(
     onPickDocs: () -> Unit,
     onRun: () -> Unit,
     busy: Boolean,
+    favouriteFormats: Set<OutputFormat> = emptySet(),
+    onToggleFavourite: (OutputFormat) -> Unit = {},
 ) {
     val cardShape = RoundedCornerShape(20.dp)
     val buttonShape = RoundedCornerShape(12.dp)

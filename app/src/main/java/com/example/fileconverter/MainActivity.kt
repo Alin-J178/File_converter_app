@@ -139,6 +139,12 @@ private fun FileConverterScreen(
     var infoRenameText by remember { mutableStateOf("") }
     LaunchedEffect(infoFile) { infoEditing = false }
 
+    // Favourite conversion state
+    var selectedFavouriteFormat by remember { mutableStateOf<OutputFormat?>(null) }
+    var favouritePickedUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var favouritePickedBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+    var favouriteBusy by remember { mutableStateOf(false) }
+
     // Format filter for browsing device files by type from pie chart legend
     var formatFilter by remember { mutableStateOf<String?>(null) }
     var filteredDeviceFiles by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
@@ -146,6 +152,20 @@ private fun FileConverterScreen(
 
     val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
     var showTutorial by remember { mutableStateOf(!prefs.getBoolean("tutorial_done", false)) }
+
+    // Favourite formats — persisted in SharedPreferences
+    var favouriteFormats by remember {
+        mutableStateOf(
+            run {
+                val saved = prefs.getStringSet("favourite_formats", emptySet()) ?: emptySet()
+                saved.mapNotNull { runCatching { OutputFormat.valueOf(it) }.getOrNull() }.toSet()
+            }
+        )
+    }
+    fun toggleFavourite(format: OutputFormat) {
+        favouriteFormats = if (format in favouriteFormats) favouriteFormats - format else favouriteFormats + format
+        prefs.edit().putStringSet("favourite_formats", favouriteFormats.map { it.name }.toSet()).apply()
+    }
 
     // Device-wide file counts from MediaStore (images + PDFs on the whole phone)
     var deviceFileCounts by remember { mutableStateOf<Map<String, Pair<Int, Long>>>(emptyMap()) }
@@ -339,6 +359,41 @@ private fun FileConverterScreen(
                 }
                 pickedDocNames = info.map { it.first }
                 pickedDocBitmaps = info.map { it.second }
+            }
+        }
+    }
+
+    // Favourite file picker — opens gallery for images, file picker for PDF
+    val pickFavouriteImage = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(10)
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            favouritePickedUris = uris
+            scope.launch {
+                val bitmaps = uris.mapNotNull { uri ->
+                    runCatching {
+                        ImageConverter.decodeSampledBitmap(context, uri, maxDim = 200)
+                    }.getOrNull()
+                }
+                favouritePickedBitmaps = bitmaps
+            }
+        }
+    }
+
+    val pickFavouriteDoc = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            favouritePickedUris = uris
+            scope.launch {
+                val bitmaps = uris.mapNotNull { uri ->
+                    runCatching {
+                        val name = ImageConverter.queryDisplayName(context, uri)
+                        ImageConverter.renderThumbnail(context, uri, name, maxDim = 200)
+                            ?: ImageConverter.createPlaceholder(name)
+                    }.getOrNull()
+                }
+                favouritePickedBitmaps = bitmaps
             }
         }
     }
@@ -552,6 +607,8 @@ private fun FileConverterScreen(
                 },
                 busy = convertBusy,
                 docBusy = docConvertBusy,
+                favouriteFormats = favouriteFormats,
+                onToggleFavourite = { format -> toggleFavourite(format) },
                 onRun = {
                     val format = selectedConvertFormat ?: return@ConvertScreen
                     val uris = pickedImageUris
@@ -629,65 +686,62 @@ private fun FileConverterScreen(
             )
         } else if (!showRecent) {
             MainScreen(
-                previews = previews,
-                selectedCount = selectedUris.size,
-                originalSize = originalSize,
-                pendingWordUris = pendingWordUris,
-                pendingPdfUri = pendingPdfUri,
-                outputFormat = outputFormat,
+                previews = favouritePickedBitmaps,
+                selectedCount = favouritePickedUris.size,
+                originalSize = favouritePickedUris.sumOf { ImageConverter.querySize(context, it) },
+                outputFormat = selectedFavouriteFormat ?: OutputFormat.JPEG,
                 quality = quality,
                 scalePercent = scalePercent,
-                originalDims = originalDims,
-                busy = busy,
-                docBusy = docBusy,
-                pdfBusy = pdfBusy,
-                convertedCount = convertedCount,
+                originalDims = null,
                 pieChartSlices = pieChartSlices,
+                favouriteFormats = favouriteFormats,
+                selectedFavouriteFormat = selectedFavouriteFormat,
+                busy = favouriteBusy,
                 onMenu = { showSettings = true },
                 onOpenLibrary = { showRecent = true },
-                onFieldClick = {
-                    when {
-                        pendingWordUris.isNotEmpty() -> pickDocx.launch(
-                            arrayOf(
-                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                "application/msword",
-                            )
-                        )
-                        pendingPdfUri != null -> pickPdf.launch(arrayOf("application/pdf"))
-                        else -> pick()
+                onFavouriteFormatSelected = { format ->
+                    selectedFavouriteFormat = format
+                    // Clear picked files when switching formats
+                    favouritePickedUris = emptyList()
+                    favouritePickedBitmaps = emptyList()
+                },
+                onPickFileForFavourite = {
+                    val format = selectedFavouriteFormat
+                    if (format != null) {
+                        if (format == OutputFormat.PDF) {
+                            pickFavouriteDoc.launch(arrayOf("application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+                        } else {
+                            pickFavouriteImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        }
                     }
                 },
-                onConvert = {
-                    when {
-                        pendingWordUris.isNotEmpty() -> convertDocx(pendingWordUris)
-                        pendingPdfUri != null -> compressPdf(pendingPdfUri!!)
-                        else -> convert()
+                onFavouriteConvert = {
+                    val format = selectedFavouriteFormat ?: return@MainScreen
+                    val uris = favouritePickedUris
+                    if (uris.isEmpty() || favouriteBusy) return@MainScreen
+                    favouriteBusy = true
+                    scope.launch {
+                        val converted = mutableListOf<ConversionResult>()
+                        for (uri in uris) {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    ImageConverter.convert(context, uri, format, quality = quality.toInt(), scalePercent = scalePercent)
+                                }
+                            }.onSuccess {
+                                converted.add(it)
+                            }.onFailure { e ->
+                                Toast.makeText(context, "Could not convert: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        if (converted.isNotEmpty()) {
+                            results = converted
+                            showSuccess = true
+                        }
+                        favouritePickedUris = emptyList()
+                        favouritePickedBitmaps = emptyList()
+                        favouriteBusy = false
                     }
                 },
-                onPickWord = {
-                    pendingWordUris = emptyList()
-                    pendingPdfUri = null
-                    selectedUris = emptyList()
-                    previews = emptyList()
-                    pickDocx.launch(
-                        arrayOf(
-                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            "application/msword",
-                        )
-                    )
-                },
-                onPickPdf = {
-                    pendingWordUris = emptyList()
-                    pendingPdfUri = null
-                    selectedUris = emptyList()
-                    previews = emptyList()
-                    results = emptyList()
-                    pickPdf.launch(arrayOf("application/pdf"))
-                },
-                onFormatSelected = { outputFormat = it },
-                onQualityChanged = { quality = it },
-                onResetQuality = { quality = 85f },
-                onScaleChanged = { scalePercent = it },
                 onFormatTap = { format ->
                     formatFilter = format
                     filteredThumbs.clear()
