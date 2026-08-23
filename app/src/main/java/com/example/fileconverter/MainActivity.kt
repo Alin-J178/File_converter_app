@@ -451,6 +451,14 @@ private fun FileConverterScreen(
                 showImagePicker = showImagePicker,
                 onImagePickerDismiss = { showImagePicker = false },
                 pickedImageBitmaps = pickedImageBitmaps,
+                onRemoveImage = { index ->
+                    if (index in pickedImageUris.indices) {
+                        pickedImageUris = pickedImageUris.toMutableList().apply { removeAt(index) }
+                    }
+                    if (index in pickedImageBitmaps.indices) {
+                        pickedImageBitmaps = pickedImageBitmaps.toMutableList().apply { removeAt(index) }
+                    }
+                },
                 onPickImages = { pickConvertImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 selectedFormat = selectedConvertFormat,
                 onFormatSelected = { selectedConvertFormat = it },

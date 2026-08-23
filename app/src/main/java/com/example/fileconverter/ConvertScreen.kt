@@ -55,6 +55,7 @@ fun ConvertScreen(
     showImagePicker: Boolean = false,
     onImagePickerDismiss: () -> Unit = {},
     pickedImageBitmaps: List<android.graphics.Bitmap> = emptyList(),
+    onRemoveImage: (Int) -> Unit = {},
     onPickImages: () -> Unit = {},
     selectedFormat: OutputFormat? = null,
     onFormatSelected: (OutputFormat) -> Unit = {},
@@ -132,6 +133,7 @@ fun ConvertScreen(
             ImageConvertOverlay(
                 onDismiss = onImagePickerDismiss,
                 pickedBitmaps = pickedImageBitmaps,
+                onRemoveImage = onRemoveImage,
                 onPickImages = onPickImages,
                 selectedFormat = selectedFormat,
                 onFormatSelected = onFormatSelected,
@@ -146,6 +148,7 @@ fun ConvertScreen(
 private fun ImageConvertOverlay(
     onDismiss: () -> Unit,
     pickedBitmaps: List<android.graphics.Bitmap>,
+    onRemoveImage: (Int) -> Unit,
     onPickImages: () -> Unit,
     selectedFormat: OutputFormat?,
     onFormatSelected: (OutputFormat) -> Unit,
@@ -224,16 +227,36 @@ private fun ImageConvertOverlay(
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            pickedBitmaps.forEach { bitmap ->
-                                Image(
-                                    bitmap = bitmap.asImageBitmap(),
-                                    contentDescription = "Preview",
-                                    modifier = Modifier
-                                        .size(104.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .border(2.dp, BrutBlack, RoundedCornerShape(8.dp)),
-                                    contentScale = ContentScale.Crop,
-                                )
+                            pickedBitmaps.forEachIndexed { index, bitmap ->
+                                Box {
+                                    Image(
+                                        bitmap = bitmap.asImageBitmap(),
+                                        contentDescription = "Preview",
+                                        modifier = Modifier
+                                            .size(104.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .border(2.dp, BrutBlack, RoundedCornerShape(8.dp)),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                    // X button to remove
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(4.dp)
+                                            .size(22.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(BrutBlack.copy(alpha = 0.7f))
+                                            .clickable { onRemoveImage(index) },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            contentDescription = "Remove",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
