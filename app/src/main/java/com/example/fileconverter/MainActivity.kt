@@ -276,13 +276,38 @@ private fun FileConverterScreen(
         contract = ActivityResultContracts.PickMultipleVisualMedia(MAX_IMAGES)
     ) { uris -> loadSelection(uris) }
 
+    // Helper: check if a URI's MIME type matches the given output format
+    fun uriMatchesFormat(context: Context, uri: Uri, format: OutputFormat): Boolean {
+        val mimeType = context.contentResolver.getType(uri) ?: return false
+        return when (format) {
+            OutputFormat.PNG -> mimeType == "image/png"
+            OutputFormat.JPEG -> mimeType == "image/jpeg"
+            OutputFormat.WEBP -> mimeType == "image/webp"
+            OutputFormat.GIF -> mimeType == "image/gif"
+            OutputFormat.BMP -> mimeType == "image/bmp"
+            OutputFormat.PDF -> mimeType == "application/pdf"
+        }
+    }
+
+    // Helper: filter URIs to exclude images that already match the target format
+    fun filterUrisForFormat(uris: List<Uri>, format: OutputFormat?): List<Uri> {
+        if (format == null) return uris
+        return uris.filter { !uriMatchesFormat(context, it, format) }
+    }
+
     val pickConvertImages = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(10)
     ) { uris ->
         if (uris.isNotEmpty()) {
-            pickedImageUris = uris
+            // Filter out images that already match the selected format
+            val filtered = filterUrisForFormat(uris, selectedConvertFormat)
+            if (filtered.isEmpty() && selectedConvertFormat != null) {
+                Toast.makeText(context, "All selected images are already ${selectedConvertFormat!!.label}", Toast.LENGTH_SHORT).show()
+                return@rememberLauncherForActivityResult
+            }
+            pickedImageUris = filtered
             scope.launch {
-                val bitmaps = uris.mapNotNull { uri ->
+                val bitmaps = filtered.mapNotNull { uri ->
                     runCatching {
                         ImageConverter.decodeSampledBitmap(context, uri, maxDim = 200)
                     }.getOrNull()
@@ -462,7 +487,26 @@ private fun FileConverterScreen(
                 },
                 onPickImages = { pickConvertImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 selectedFormat = selectedConvertFormat,
-                onFormatSelected = { selectedConvertFormat = it },
+                onFormatSelected = { format ->
+                    selectedConvertFormat = format
+                    // Re-filter already picked images when format changes
+                    if (pickedImageUris.isNotEmpty()) {
+                        val filtered = filterUrisForFormat(pickedImageUris, format)
+                        if (filtered.size < pickedImageUris.size) {
+                            val removed = pickedImageUris.size - filtered.size
+                            Toast.makeText(context, "$removed image${if (removed > 1) "s" else ""} removed (already ${format.label})", Toast.LENGTH_SHORT).show()
+                        }
+                        pickedImageUris = filtered
+                        scope.launch {
+                            val bitmaps = filtered.mapNotNull { uri ->
+                                runCatching {
+                                    ImageConverter.decodeSampledBitmap(context, uri, maxDim = 200)
+                                }.getOrNull()
+                            }
+                            pickedImageBitmaps = bitmaps
+                        }
+                    }
+                },
                 busy = convertBusy,
                 onRun = {
                     val format = selectedConvertFormat ?: return@ConvertScreen
