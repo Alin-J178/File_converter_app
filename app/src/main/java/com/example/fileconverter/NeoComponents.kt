@@ -336,6 +336,7 @@ data class PieSlice(
     val label: String,
     val value: Float,
     val color: Color,
+    val sizeBytes: Long = 0L,
 )
 
 /**
@@ -424,12 +425,21 @@ fun NeoPieChart(
                                                     .border(2.dp, BrutBlack, RoundedCornerShape(3.dp)),
                                             )
                                             Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                text = "${slice.label} (${slice.value.toInt()})",
-                                                color = BrutBlack,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                            )
+                                            Column {
+                                                Text(
+                                                    text = "${slice.label} (${slice.value.toInt()})",
+                                                    color = BrutBlack,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                )
+                                                if (slice.sizeBytes > 0) {
+                                                    Text(
+                                                        text = formatBytes(slice.sizeBytes),
+                                                        color = BrutMuted,
+                                                        fontSize = 11.sp,
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                     // Fill remaining space if odd number

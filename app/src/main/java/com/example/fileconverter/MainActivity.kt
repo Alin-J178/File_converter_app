@@ -136,7 +136,7 @@ private fun FileConverterScreen(
     var showTutorial by remember { mutableStateOf(!prefs.getBoolean("tutorial_done", false)) }
 
     // Device-wide file counts from MediaStore (images + PDFs on the whole phone)
-    var deviceFileCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var deviceFileCounts by remember { mutableStateOf<Map<String, Pair<Int, Long>>>(emptyMap()) }
 
     // Runtime permission for reading media files on the device
     val mediaPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -229,8 +229,8 @@ private fun FileConverterScreen(
                 "BMP" to BrutOrange,
                 "PDF" to BrutBlue,
             )
-            deviceFileCounts.filter { it.value > 0 }.map { (label, count) ->
-                PieSlice(label, count.toFloat(), colorMap[label] ?: BrutGrey)
+            deviceFileCounts.filter { it.value.first > 0 }.map { (label, pair) ->
+                PieSlice(label, pair.first.toFloat(), colorMap[label] ?: BrutGrey, sizeBytes = pair.second)
             }
         }
     }

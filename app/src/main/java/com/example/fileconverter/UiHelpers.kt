@@ -46,49 +46,61 @@ internal fun countFormatsByExtension(files: List<RecentFile>): Map<String, Int> 
  * Returns a map like {"PNG" -> 120, "JPEG" -> 340, "PDF" -> 15}.
  * Uses both MIME type and file extension to catch all file types.
  */
-internal fun queryDeviceFileCounts(context: Context): Map<String, Int> {
-    val counts = mutableMapOf<String, Int>()
+internal fun queryDeviceFileCounts(context: Context): Map<String, Pair<Int, Long>> {
+    // label -> (count, totalSizeBytes)
+    val counts = mutableMapOf<String, Pair<Int, Long>>()
+    fun addCount(label: String, size: Long = 0L) {
+        val prev = counts[label] ?: (0 to 0L)
+        counts[label] = (prev.first + 1) to (prev.second + size)
+    }
 
     // --- Images via MediaStore.Images (PNG, JPEG, WebP) ---
-    val imageProjection = arrayOf(MediaStore.Images.Media.MIME_TYPE)
+    val imageProjection = arrayOf(MediaStore.Images.Media.MIME_TYPE, MediaStore.Images.Media.SIZE)
     val imageMimeCol = MediaStore.Images.Media.MIME_TYPE
+    val imageSizeCol = MediaStore.Images.Media.SIZE
     val imageMimes = listOf(
         "image/png" to "PNG",
         "image/jpeg" to "JPEG",
         "image/webp" to "WebP",
     )
     for ((mime, label) in imageMimes) {
-        val cursor = context.contentResolver.query(
+        context.contentResolver.query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             imageProjection,
             "$imageMimeCol = ?",
             arrayOf(mime),
             null,
-        )
-        cursor?.use {
-            counts[label] = (counts[label] ?: 0) + it.count
+        )?.use { cursor ->
+            val sizeIdx = cursor.getColumnIndex(imageSizeCol)
+            while (cursor.moveToNext()) {
+                val size = if (sizeIdx >= 0) cursor.getLong(sizeIdx) else 0L
+                addCount(label, size)
+            }
         }
     }
 
     // --- All files via MediaStore.Files, matched by extension ---
-    // This catches BMP, GIF, PDF and any other format regardless of MIME type
     val extMap = listOf(
         ".gif" to "GIF",
         ".bmp" to "BMP",
         ".pdf" to "PDF",
     )
-    val filesProjection = arrayOf(MediaStore.Files.FileColumns.DISPLAY_NAME)
+    val filesProjection = arrayOf(MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.SIZE)
     val nameCol = MediaStore.Files.FileColumns.DISPLAY_NAME
+    val filesSizeCol = MediaStore.Files.FileColumns.SIZE
     for ((ext, label) in extMap) {
-        val cursor = context.contentResolver.query(
+        context.contentResolver.query(
             MediaStore.Files.getContentUri("external"),
             filesProjection,
             "$nameCol LIKE ?",
             arrayOf("%$ext"),
             null,
-        )
-        cursor?.use {
-            counts[label] = (counts[label] ?: 0) + it.count
+        )?.use { cursor ->
+            val sizeIdx = cursor.getColumnIndex(filesSizeCol)
+            while (cursor.moveToNext()) {
+                val size = if (sizeIdx >= 0) cursor.getLong(sizeIdx) else 0L
+                addCount(label, size)
+            }
         }
     }
 
