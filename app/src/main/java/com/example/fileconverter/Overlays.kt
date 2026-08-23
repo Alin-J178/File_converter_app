@@ -29,12 +29,15 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,7 +59,13 @@ import kotlinx.coroutines.launch
 
 /** Hamburger settings drawer with the app info. */
 @Composable
-internal fun SettingsDrawer(visible: Boolean, onDismiss: () -> Unit) {
+internal fun SettingsDrawer(
+    visible: Boolean,
+    onDismiss: () -> Unit,
+    onConvert: () -> Unit = {},
+    onSavedFiles: () -> Unit = {},
+    onSettings: () -> Unit = {},
+) {
     AnimatedVisibility(
         visible = visible,
         enter = slideInHorizontally(initialOffsetX = { -it }, animationSpec = tween(280)),
@@ -95,17 +104,17 @@ internal fun SettingsDrawer(visible: Boolean, onDismiss: () -> Unit) {
                     Spacer(modifier = Modifier.height(24.dp))
                     Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(BrutBlack))
                     Spacer(modifier = Modifier.height(20.dp))
-                    DrawerItem(icon = Icons.Filled.Image, label = "Convert Images", description = "PNG, JPEG, WebP")
-                    DrawerItem(icon = Icons.Filled.Description, label = "Word to PDF", description = "Convert .doc/.docx to PDF")
-                    DrawerItem(icon = Icons.Filled.PictureAsPdf, label = "Compress PDF", description = "Reduce PDF file size")
-                    DrawerItem(icon = Icons.Filled.Folder, label = "Saved Files", description = "Browse converted files")
+                    DrawerItem(icon = Icons.Filled.SwapHoriz, label = "Convert", description = "Image, Word, PDF conversions", onClick = { onDismiss(); onConvert() })
+                    Spacer(modifier = Modifier.height(4.dp))
+                    DrawerItem(icon = Icons.Filled.Folder, label = "Saved Files", description = "Browse converted files", onClick = { onDismiss(); onSavedFiles() })
+                    DrawerItem(icon = Icons.Filled.Settings, label = "Settings", description = "App preferences", onClick = { onDismiss(); onSettings() })
                     Spacer(modifier = Modifier.height(20.dp))
                     Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(BrutBlack))
                     Spacer(modifier = Modifier.height(20.dp))
                     Text("About", color = BrutBlack, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Convert & compress images to JPEG, PNG, WebP, or PDF. Images save to Pictures/FileConverter; PDFs to Download/FileConverter.",
+                        text = "Convert & compress images to JPEG, PNG, WebP, GIF, BMP, or PDF. Images save to Pictures/FileConverter; PDFs to Download/FileConverter.",
                         color = BrutMuted, fontSize = 12.sp, lineHeight = 16.sp,
                     )
                     Spacer(modifier = Modifier.height(20.dp))
@@ -363,9 +372,9 @@ private fun InfoRow(label: String, value: String) {
 }
 
 @Composable
-private fun DrawerItem(icon: ImageVector, label: String, description: String, modifier: Modifier = Modifier) {
+private fun DrawerItem(icon: ImageVector, label: String, description: String, modifier: Modifier = Modifier, onClick: () -> Unit = {}) {
     Row(
-        modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { }.padding(vertical = 12.dp, horizontal = 4.dp),
+        modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onClick() }.padding(vertical = 12.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(

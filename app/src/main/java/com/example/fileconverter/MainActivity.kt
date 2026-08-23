@@ -111,6 +111,7 @@ private fun FileConverterScreen(
     var results by remember { mutableStateOf<List<ConversionResult>>(emptyList()) }
     var outputFormat by remember { mutableStateOf(OutputFormat.JPEG) }
     var showSettings by remember { mutableStateOf(false) }
+    var showConvertScreen by remember { mutableStateOf(false) }
     var showRecent by remember { mutableStateOf(false) }
     var recentFiles by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
     var pendingWordUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
@@ -422,7 +423,12 @@ private fun FileConverterScreen(
     Box(modifier = Modifier.fillMaxSize().background(BrutCream)) {
         BackgroundBlobs()
 
-        if (!showRecent) {
+        if (showConvertScreen) {
+            ConvertScreen(
+                onBack = { showConvertScreen = false },
+                onSelectImage = { showConvertScreen = false },
+            )
+        } else if (!showRecent) {
             MainScreen(
                 previews = previews,
                 selectedCount = selectedUris.size,
@@ -510,7 +516,11 @@ private fun FileConverterScreen(
         SettingsDrawer(
             visible = showSettings,
             onDismiss = { showSettings = false },
+            onConvert = { showConvertScreen = true },
+            onSavedFiles = { showRecent = true },
         )
+
+
 
         if (showRecent) {
             val displayFiles = if (formatFilter != null) filteredDeviceFiles else recentFiles
