@@ -83,6 +83,10 @@ internal fun queryDeviceFileCounts(context: Context): Map<String, Pair<Int, Long
     val extMap = listOf(
         ".gif" to "GIF",
         ".bmp" to "BMP",
+        ".tiff" to "TIFF",
+        ".tif" to "TIFF",
+        ".heic" to "HEIF",
+        ".heif" to "HEIF",
         ".pdf" to "PDF",
     )
     val filesProjection = arrayOf(MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.SIZE)
@@ -118,9 +122,11 @@ internal fun queryDeviceFilesByFormat(context: Context, formatLabel: String): Li
 
     // Extensions that may not be indexed by MIME type in MediaStore
     val extMap = mapOf(
-        "GIF" to ".gif",
-        "BMP" to ".bmp",
-        "PDF" to ".pdf",
+        "GIF" to listOf(".gif"),
+        "BMP" to listOf(".bmp"),
+        "TIFF" to listOf(".tiff", ".tif"),
+        "HEIF" to listOf(".heic", ".heif"),
+        "PDF" to listOf(".pdf"),
     )
 
     val collection = MediaStore.Files.getContentUri("external")
@@ -133,9 +139,9 @@ internal fun queryDeviceFilesByFormat(context: Context, formatLabel: String): Li
     val sortOrder = "${MediaStore.MediaColumns.DATE_ADDED} DESC"
 
     if (label in extMap) {
-        // Match by file extension for formats MediaStore may not MIME-type correctly
         val nameCol = MediaStore.MediaColumns.DISPLAY_NAME
-        val ext = extMap[label]!!
+        val extensions = extMap[label]!!
+        for (ext in extensions) {
         runCatching {
             context.contentResolver.query(
                 collection,
@@ -164,6 +170,7 @@ internal fun queryDeviceFilesByFormat(context: Context, formatLabel: String): Li
                 }
             }
         }.onFailure { android.util.Log.w("FileConverter", "queryDeviceFilesByFormat ext failed", it) }
+        } // end for (extensions)
     } else {
         // Match by MIME type for standard formats
         val mimeMap = mapOf(

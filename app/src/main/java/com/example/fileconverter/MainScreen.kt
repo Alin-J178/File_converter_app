@@ -269,6 +269,8 @@ internal fun MainScreen(
                         OutputFormat.WEBP -> BrutPink
                         OutputFormat.GIF -> BrutPurple
                         OutputFormat.BMP -> BrutOrange
+                        OutputFormat.TIFF -> Color(0xFF8D6E63)
+                        OutputFormat.HEIF -> Color(0xFF7E57C2)
                         OutputFormat.PDF -> BrutBlue
                     }
                     val bgColor = if (isSelected) accent else Color.White

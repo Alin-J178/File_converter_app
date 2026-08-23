@@ -18,6 +18,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -259,6 +260,8 @@ private fun FileConverterScreen(
                 "WebP" to BrutPink,
                 "GIF" to BrutPurple,
                 "BMP" to BrutOrange,
+                "TIFF" to Color(0xFF8D6E63),
+                "HEIF" to Color(0xFF7E57C2),
                 "PDF" to BrutBlue,
             )
             deviceFileCounts.filter { it.value.first > 0 }.map { (label, pair) ->
@@ -310,6 +313,8 @@ private fun FileConverterScreen(
             OutputFormat.WEBP -> mimeType == "image/webp"
             OutputFormat.GIF -> mimeType == "image/gif"
             OutputFormat.BMP -> mimeType == "image/bmp"
+            OutputFormat.TIFF -> mimeType == "image/tiff"
+            OutputFormat.HEIF -> mimeType == "image/heif" || mimeType == "image/heic"
             OutputFormat.PDF -> mimeType == "application/pdf"
         }
     }
@@ -632,12 +637,10 @@ private fun FileConverterScreen(
                             results = converted
                             showSuccess = true
                         }
-                        // Reset convert screen state
                         pickedImageUris = emptyList()
                         pickedImageBitmaps = emptyList()
                         selectedConvertFormat = null
                         convertBusy = false
-                        showConvertScreen = false
                     }
                 },
                 onDocRun = {
@@ -680,7 +683,6 @@ private fun FileConverterScreen(
                         pickedDocBitmaps = emptyList()
                         pickedDocNames = emptyList()
                         docConvertBusy = false
-                        showConvertScreen = false
                     }
                 },
             )
@@ -905,6 +907,12 @@ private fun FileConverterScreen(
                     results = emptyList()
                     pendingWordUris = emptyList()
                     pendingPdfUri = null
+                    // If we were on the convert screen, go back to main
+                    if (showConvertScreen) {
+                        showConvertScreen = false
+                        showImagePicker = false
+                        showDocPicker = false
+                    }
                     refreshLibrary()
                 },
             )

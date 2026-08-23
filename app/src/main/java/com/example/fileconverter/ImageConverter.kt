@@ -36,6 +36,8 @@ enum class OutputFormat(
     WEBP("WebP", "webp", "image/webp", lossy = true),
     GIF("GIF", "gif", "image/gif", lossy = true),
     BMP("BMP", "bmp", "image/bmp", lossy = false),
+    TIFF("TIFF", "tiff", "image/tiff", lossy = false),
+    HEIF("HEIF", "heif", "image/heif", lossy = true),
     PDF("PDF", "pdf", "application/pdf", lossy = true),
 }
 
@@ -149,6 +151,19 @@ object ImageConverter {
             }
             OutputFormat.BMP -> {
                 return saveAsBmp(context, bitmap, displayName)
+            }
+            OutputFormat.TIFF -> {
+                return saveAsTiff(context, bitmap, displayName)
+            }
+            OutputFormat.HEIF -> {
+                // Use WEBP_LOSSY for encoding (HEIF encoder may not be available on all devices)
+                // but save with .heif extension and image/heif MIME type
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    Bitmap.CompressFormat.WEBP_LOSSY
+                } else {
+                    @Suppress("DEPRECATION")
+                    Bitmap.CompressFormat.WEBP
+                }
             }
             OutputFormat.PDF -> error("PDF files are created via saveAsPdf")
         }
@@ -534,6 +549,121 @@ object ImageConverter {
             }
             Uri.fromFile(file)
         }
+    }
+
+    /**
+     * Saves [bitmap] as an uncompressed TIFF (Baseline TIFF, Little-Endian, RGB24).
+     */
+    private fun saveAsTiff(context: Context, bitmap: Bitmap, displayName: String): Uri {
+        val width = bitmap.width
+        val height = bitmap.height
+        val bytesPerRow = width * 3
+        val rowStride = (bytesPerRow + 1) and 1.inv()
+        val stripDataSize = rowStride * height
+
+        val numTags = 10
+        val ifdSize = 2 + numTags * 12 + 4
+        val stripOffset = 8 + ifdSize
+        val bpsOffset = stripOffset + stripDataSize
+
+        // Write directly to MediaStore output stream
+        val resolver = context.contentResolver
+        val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, displayName)
+                put(MediaStore.Downloads.MIME_TYPE, "image/tiff")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/FileConverter")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            resolver.insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL), values)
+                ?: error("Failed to create MediaStore entry")
+        } else {
+            val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "FileConverter")
+            if (!dir.exists() && !dir.mkdirs()) error("Failed to create output directory")
+            Uri.fromFile(File(dir, displayName))
+        }
+
+        resolver.openOutputStream(uri)!!.use { raw ->
+            val w = java.io.DataOutputStream(raw)
+
+            // Header
+            w.writeByte(0x49); w.writeByte(0x4D) // "II" LE
+            writeShortLE(w, 42) // TIFF magic — must be LE!
+            writeIntLE(w, 8) // IFD offset
+
+            // IFD
+            writeShortLE(w, numTags)
+
+            fun tag(t: Int, typ: Int, cnt: Int, v: Int) {
+                writeShortLE(w, t)
+                writeShortLE(w, typ)
+                writeIntLE(w, cnt)
+                writeIntLE(w, v)
+            }
+
+            tag(256, 3, 1, width)           // ImageWidth  (SHORT)
+            tag(257, 3, 1, height)          // ImageLength (SHORT)
+            tag(258, 3, 3, bpsOffset)       // BitsPerSample -> offset to 3 SHORTs
+            tag(259, 3, 1, 1)               // Compression = None (SHORT)
+            tag(262, 3, 1, 2)               // Photometric = RGB (SHORT)
+            tag(273, 4, 1, stripOffset)     // StripOffsets (LONG)
+            tag(277, 3, 1, 3)               // SamplesPerPixel = 3 (SHORT)
+            tag(278, 3, 1, height.coerceAtMost(65535)) // RowsPerStrip (SHORT)
+            tag(279, 4, 1, stripDataSize)   // StripByteCounts (LONG)
+            tag(284, 3, 1, 1)               // PlanarConfig = Chunky (SHORT)
+            writeIntLE(w, 0)                // no next IFD
+
+            // Pixel data — one strip, RGB interleaved, rows padded to even
+            val px = IntArray(width)
+            val row = ByteArray(rowStride)
+            for (y in 0 until height) {
+                bitmap.getPixels(px, 0, width, 0, y, width, 1)
+                var i = 0
+                for (x in 0 until width) {
+                    val c = px[x]
+                    row[i++] = ((c shr 16) and 0xFF).toByte()
+                    row[i++] = ((c shr 8) and 0xFF).toByte()
+                    row[i++] = (c and 0xFF).toByte()
+                }
+                while (i < rowStride) row[i++] = 0
+                w.write(row)
+            }
+
+            // BitsPerSample data: 3 x SHORT(8) = 6 bytes (padded to 8 for alignment)
+            writeShortLE(w, 8)
+            writeShortLE(w, 8)
+            writeShortLE(w, 8)
+            writeShortLE(w, 0) // pad to word boundary
+
+            w.flush()
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+        }
+        return uri
+    }
+
+    /** Writes a 32-bit little-endian integer to a DataOutputStream. */
+    private fun writeIntLE(w: java.io.DataOutputStream, value: Int) {
+        w.writeByte(value and 0xFF)
+        w.writeByte((value shr 8) and 0xFF)
+        w.writeByte((value shr 16) and 0xFF)
+        w.writeByte((value shr 24) and 0xFF)
+    }
+
+    /** Writes a 32-bit little-endian integer to a ByteArrayOutputStream. */
+    private fun writeIntLE(out: java.io.ByteArrayOutputStream, value: Int) {
+        out.write(value and 0xFF)
+        out.write((value shr 8) and 0xFF)
+        out.write((value shr 16) and 0xFF)
+        out.write((value shr 24) and 0xFF)
+    }
+
+    /** Writes a 16-bit little-endian integer to a ByteArrayOutputStream. */
+    private fun writeShortLE(out: java.io.ByteArrayOutputStream, value: Int) {
+        out.write(value and 0xFF)
+        out.write((value shr 8) and 0xFF)
     }
 
     fun convert(context: Context, uri: Uri, format: OutputFormat, quality: Int, scalePercent: Int): ConversionResult {

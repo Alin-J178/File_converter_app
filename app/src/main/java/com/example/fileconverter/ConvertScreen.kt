@@ -301,6 +301,8 @@ private fun ImageConvertOverlay(
                     OutputFormat.WEBP to BrutPink,
                     OutputFormat.GIF to BrutPurple,
                     OutputFormat.BMP to BrutOrange,
+                    OutputFormat.TIFF to Color(0xFF8D6E63), // brown
+                    OutputFormat.HEIF to Color(0xFF7E57C2), // deep purple
                 )
 
                 @OptIn(ExperimentalFoundationApi::class)
