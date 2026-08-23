@@ -1,18 +1,21 @@
 package com.example.fileconverter
 
+import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -23,9 +26,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -34,7 +40,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -42,6 +52,14 @@ import androidx.compose.ui.unit.sp
 fun ConvertScreen(
     onBack: () -> Unit,
     onSelectImage: () -> Unit,
+    showImagePicker: Boolean = false,
+    onImagePickerDismiss: () -> Unit = {},
+    pickedImageBitmaps: List<android.graphics.Bitmap> = emptyList(),
+    onPickImages: () -> Unit = {},
+    selectedFormat: OutputFormat? = null,
+    onFormatSelected: (OutputFormat) -> Unit = {},
+    onRun: () -> Unit = {},
+    busy: Boolean = false,
 ) {
     Box(
         modifier = Modifier
@@ -107,6 +125,196 @@ fun ConvertScreen(
                 enabled = false,
                 onClick = {},
             )
+        }
+
+        // Image conversion overlay
+        if (showImagePicker) {
+            ImageConvertOverlay(
+                onDismiss = onImagePickerDismiss,
+                pickedBitmaps = pickedImageBitmaps,
+                onPickImages = onPickImages,
+                selectedFormat = selectedFormat,
+                onFormatSelected = onFormatSelected,
+                onRun = onRun,
+                busy = busy,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImageConvertOverlay(
+    onDismiss: () -> Unit,
+    pickedBitmaps: List<android.graphics.Bitmap>,
+    onPickImages: () -> Unit,
+    selectedFormat: OutputFormat?,
+    onFormatSelected: (OutputFormat) -> Unit,
+    onRun: () -> Unit,
+    busy: Boolean,
+) {
+    val cardShape = RoundedCornerShape(20.dp)
+    val buttonShape = RoundedCornerShape(12.dp)
+    val blueBg = Color(0xFF5B9BD5)
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Dim scrim
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0x66000000))
+                .clickable { onDismiss() },
+        )
+
+        // Overlay card
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(horizontal = 28.dp)
+                .clip(cardShape)
+                .background(blueBg)
+                .border(3.dp, BrutBlack, cardShape)
+                .clickable(enabled = false) { /* consume clicks */ }
+                .padding(16.dp),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // Select image button
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(buttonShape)
+                        .background(Color.White)
+                        .border(2.dp, BrutBlack, buttonShape)
+                        .clickable { onPickImages() }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.PhotoLibrary,
+                            contentDescription = null,
+                            tint = BrutBlack,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Select an image",
+                            color = BrutBlack,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+
+                // Image preview strip
+                if (pickedBitmaps.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp)
+                            .clip(buttonShape)
+                            .background(Color.White.copy(alpha = 0.5f))
+                            .border(2.dp, BrutBlack, buttonShape)
+                            .padding(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            pickedBitmaps.forEach { bitmap ->
+                                Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = "Preview",
+                                    modifier = Modifier
+                                        .size(104.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .border(2.dp, BrutBlack, RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Close button (top-right corner of card)
+                // Actually let's put it as a small X at the top right
+                // We'll handle dismiss via scrim click instead
+
+                // Format buttons
+                val formats = listOf(
+                    OutputFormat.PNG to BrutGreen,
+                    OutputFormat.JPEG to BrutYellow,
+                    OutputFormat.WEBP to BrutPink,
+                    OutputFormat.GIF to BrutPurple,
+                    OutputFormat.BMP to BrutOrange,
+                )
+
+                formats.forEach { (format, color) ->
+                    val isSelected = selectedFormat == format
+                    val bgColor = if (isSelected) color else Color.White
+                    val textColor = if (isSelected) BrutBlack else BrutBlack
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(buttonShape)
+                            .background(bgColor)
+                            .border(2.dp, BrutBlack, buttonShape)
+                            .clickable { onFormatSelected(format) }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = format.label,
+                                color = textColor,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (isSelected) {
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = "Selected",
+                                    tint = BrutBlack,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Run button (fixed at bottom)
+                val runEnabled = selectedFormat != null && pickedBitmaps.isNotEmpty() && !busy
+                val runBg = if (runEnabled) BrutGreen else BrutGrey.copy(alpha = 0.4f)
+                val runBorder = if (runEnabled) BrutBlack else BrutGrey
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(buttonShape)
+                        .background(runBg)
+                        .border(2.dp, runBorder, buttonShape)
+                        .clickable(enabled = runEnabled) { onRun() }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (busy) "Converting..." else "Run",
+                        color = BrutBlack,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
         }
     }
 }

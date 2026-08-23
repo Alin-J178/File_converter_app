@@ -112,6 +112,11 @@ private fun FileConverterScreen(
     var outputFormat by remember { mutableStateOf(OutputFormat.JPEG) }
     var showSettings by remember { mutableStateOf(false) }
     var showConvertScreen by remember { mutableStateOf(false) }
+    var showImagePicker by remember { mutableStateOf(false) }
+    var pickedImageUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var pickedImageBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+    var selectedConvertFormat by remember { mutableStateOf<OutputFormat?>(null) }
+    var convertBusy by remember { mutableStateOf(false) }
     var showRecent by remember { mutableStateOf(false) }
     var recentFiles by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
     var pendingWordUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
@@ -270,6 +275,22 @@ private fun FileConverterScreen(
         contract = ActivityResultContracts.PickMultipleVisualMedia(MAX_IMAGES)
     ) { uris -> loadSelection(uris) }
 
+    val pickConvertImages = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(10)
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            pickedImageUris = uris
+            scope.launch {
+                val bitmaps = uris.mapNotNull { uri ->
+                    runCatching {
+                        ImageConverter.decodeSampledBitmap(context, uri, maxDim = 200)
+                    }.getOrNull()
+                }
+                pickedImageBitmaps = bitmaps
+            }
+        }
+    }
+
     LaunchedEffect(sharedUris) {
         val uris = sharedUris
         if (!uris.isNullOrEmpty()) {
@@ -425,8 +446,46 @@ private fun FileConverterScreen(
 
         if (showConvertScreen) {
             ConvertScreen(
-                onBack = { showConvertScreen = false },
-                onSelectImage = { showConvertScreen = false },
+                onBack = { showConvertScreen = false; showImagePicker = false },
+                onSelectImage = { showImagePicker = true },
+                showImagePicker = showImagePicker,
+                onImagePickerDismiss = { showImagePicker = false },
+                pickedImageBitmaps = pickedImageBitmaps,
+                onPickImages = { pickConvertImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                selectedFormat = selectedConvertFormat,
+                onFormatSelected = { selectedConvertFormat = it },
+                busy = convertBusy,
+                onRun = {
+                    val format = selectedConvertFormat ?: return@ConvertScreen
+                    val uris = pickedImageUris
+                    if (uris.isEmpty() || convertBusy) return@ConvertScreen
+                    convertBusy = true
+                    showImagePicker = false
+                    scope.launch {
+                        val converted = mutableListOf<ConversionResult>()
+                        for (uri in uris) {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    ImageConverter.convert(context, uri, format, quality = quality.toInt(), scalePercent = scalePercent)
+                                }
+                            }.onSuccess {
+                                converted.add(it)
+                            }.onFailure { e ->
+                                Toast.makeText(context, "Could not convert: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        if (converted.isNotEmpty()) {
+                            results = converted
+                            showSuccess = true
+                        }
+                        // Reset convert screen state
+                        pickedImageUris = emptyList()
+                        pickedImageBitmaps = emptyList()
+                        selectedConvertFormat = null
+                        convertBusy = false
+                        showConvertScreen = false
+                    }
+                },
             )
         } else if (!showRecent) {
             MainScreen(
