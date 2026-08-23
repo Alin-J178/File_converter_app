@@ -117,6 +117,7 @@ private fun FileConverterScreen(
     var pickedImageBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var selectedConvertFormat by remember { mutableStateOf<OutputFormat?>(null) }
     var convertBusy by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
     var showRecent by remember { mutableStateOf(false) }
     var recentFiles by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
     var pendingWordUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
@@ -668,6 +669,8 @@ private fun FileConverterScreen(
                         Toast.makeText(context, "All converted files cleared", Toast.LENGTH_SHORT).show()
                     }
                 },
+                showClearConfirm = showClearConfirm,
+                onShowClearConfirm = { showClearConfirm = it },
                 onThumbLoaded = { uriStr, bmp ->
                     if (formatFilter != null) {
                         filteredThumbs[uriStr] = bmp

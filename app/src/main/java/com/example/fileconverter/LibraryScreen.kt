@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +37,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,6 +70,8 @@ internal fun LibraryScreen(
     onDeleteSelected: () -> Unit,
     onLongPress: (RecentFile, Pair<Int, Int>?, String?) -> Unit,
     onClearAll: () -> Unit,
+    showClearConfirm: Boolean = false,
+    onShowClearConfirm: (Boolean) -> Unit = {},
     onThumbLoaded: ((String, Bitmap) -> Unit)? = null,
     title: String? = null,
 ) {
@@ -77,7 +83,7 @@ internal fun LibraryScreen(
             .zIndex(10f)
             .safeDrawingPadding(),
     ) {
-        Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+        Column(modifier = Modifier.padding(20.dp)) {
             // Header: back + title + action buttons
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -204,16 +210,58 @@ internal fun LibraryScreen(
             // Clear All button
             if (recentFiles.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(16.dp))
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    NeoButton(
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {                        NeoButton(
                         text = "Clear All",
-                        onClick = onClearAll,
+                        onClick = { onShowClearConfirm(true) },
                         modifier = Modifier.width(180.dp),
                         height = 44.dp,
                         backgroundColor = BrutGrey,
                     )
                 }
             }
+        }
+
+        // Clear All confirmation dialog
+        if (showClearConfirm) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { onShowClearConfirm(false) },
+                containerColor = BrutCream,
+                shape = RoundedCornerShape(18.dp),
+                title = {
+                    Text(
+                        text = "Clear All Files?",
+                        color = BrutBlack,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Black,
+                    )
+                },
+                text = {
+                    Text(
+                        text = "This will remove all ${recentFiles.size} converted files from your storage. This action cannot be undone.",
+                        color = BrutMuted,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                    )
+                },
+                confirmButton = {
+                    NeoButton(
+                        text = "Clear All",
+                        onClick = { onShowClearConfirm(false); onClearAll() },
+                        modifier = Modifier.width(120.dp),
+                        height = 40.dp,
+                        backgroundColor = BrutPink,
+                    )
+                },
+                dismissButton = {
+                    NeoButton(
+                        text = "Cancel",
+                        onClick = { onShowClearConfirm(false) },
+                        modifier = Modifier.width(120.dp),
+                        height = 40.dp,
+                        backgroundColor = Color.White,
+                    )
+                },
+            )
         }
     }
 }
