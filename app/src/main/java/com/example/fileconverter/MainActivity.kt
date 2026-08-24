@@ -277,6 +277,8 @@ private fun FileConverterScreen(
                 "HEIF" to Color(0xFF7E57C2),
                 "AVIF" to Color(0xFF00897B),
                 "SVG" to Color(0xFFEF6C00),
+                "XLSX" to Color(0xFF217346),
+                "PPTX" to Color(0xFFD04423),
                 "PDF" to pieChartColors.blue,
             )
             deviceFileCounts.filter { it.value.first > 0 }.map { (label, pair) ->
@@ -605,20 +607,7 @@ private fun FileConverterScreen(
                     }
                 },
                 onPickImages = { pickConvertImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                onPickDocs = { pickConvertDocs.launch(arrayOf(
-                    "application/pdf",
-                    "application/msword",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    "text/plain",                         // TXT
-                    "text/markdown",                       // MD
-                    "text/html",                           // HTML
-                    "application/rtf",                     // RTF
-                    "application/vnd.oasis.opendocument.text", // ODT
-                    "text/csv",                            // CSV
-                    "application/vnd.ms-powerpoint",      // PPT
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation", // PPTX
-                    "image/*",
-                )) },
+                onPickDocs = { pickConvertDocs.launch(arrayOf("*/*")) },
                 selectedFormat = selectedConvertFormat,
                 onFormatSelected = { format ->
                     selectedConvertFormat = format
@@ -689,6 +678,7 @@ private fun FileConverterScreen(
                                     val name = ImageConverter.queryDisplayName(context, uri)
                                     val ext = name.substringAfterLast('.', "").lowercase()
                                     val ts = System.currentTimeMillis()
+                                    android.util.Log.d("FileConverter", "DOC_CONVERT: uri=$uri, mimeType=$mimeType, name=$name, ext=$ext, selectedOutput=$selectedDocOutput")
                                     when {
                                         // Images → PDF
                                         mimeType.startsWith("image/") -> {
@@ -752,21 +742,73 @@ private fun FileConverterScreen(
                                                 ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
                                             }
                                         }
+                                        // PPTX input → just copy it through (already modern format)
                                         // PPT → PPTX or PDF
-                                        mimeType == "application/vnd.ms-powerpoint" || ext == "ppt" -> {
+                                        // Match by ext first (most reliable), also catch PPTX MIME type
+                                        // when ext doesn't contain pptx (file picker MIME mismatch)
+                                        ext == "ppt" ||
+                                        (mimeType == "application/vnd.ms-powerpoint" && ext != "pptx") ||
+                                        (mimeType == "application/vnd.openxmlformats-officedocument.presentationml.presentation" && ext == "ppt") -> {
                                             if (selectedDocOutput == "PPTX") {
                                                 val outName = "converted_$ts.pptx"
                                                 val outUri = PptToPptx.convert(context, uri, outName)
                                                 ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
                                             } else {
-                                                // PPT → PDF (render as text)
+                                                val outName = "converted_$ts.pdf"
+                                                val outUri = TxtToPdf.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            }
+                                        }
+                                        // PPTX input → PPTX output (already modern, just copy)
+                                        ext == "pptx" ||
+                                        mimeType == "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> {
+                                            if (selectedDocOutput == "PPTX") {
+                                                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                                                    ?: error("Could not read the PPTX file")
+                                                val outName = "converted_$ts.pptx"
+                                                val outUri = ImageConverter.saveBytesToMediaStore(context, bytes, outName, "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            } else {
                                                 val outName = "converted_$ts.pdf"
                                                 val outUri = TxtToPdf.convert(context, uri, outName)
                                                 ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
                                             }
                                         }
                                         else -> {
-                                            error("Unsupported file type: $mimeType")
+                                            // Last resort: try to read the first bytes to detect format
+                                            val firstBytes = context.contentResolver.openInputStream(uri)?.use { s ->
+                                                val buf = ByteArray(8)
+                                                s.read(buf)
+                                                buf
+                                            } ?: byteArrayOf()
+                                            val sig = String(firstBytes, Charsets.US_ASCII)
+                                            when {
+                                                // PPT legacy OLE2 signature
+                                                firstBytes.size >= 4 && firstBytes[0] == 0xD0.toByte() && firstBytes[1] == 0xCF.toByte() -> {
+                                                    if (selectedDocOutput == "PPTX") {
+                                                        val outName = "converted_$ts.pptx"
+                                                        val outUri = PptToPptx.convert(context, uri, outName)
+                                                        ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                                    } else {
+                                                        val outName = "converted_$ts.pdf"
+                                                        val outUri = TxtToPdf.convert(context, uri, outName)
+                                                        ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                                    }
+                                                }
+                                                // ZIP-based (XLSX, PPTX, DOCX, ODT)
+                                                firstBytes.size >= 2 && firstBytes[0] == 0x50.toByte() && firstBytes[1] == 0x4B.toByte() -> {
+                                                    // Try as text to PDF as fallback
+                                                    val outName = "converted_$ts.pdf"
+                                                    val outUri = TxtToPdf.convert(context, uri, outName)
+                                                    ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                                }
+                                                else -> {
+                                                    // Try treating as text → PDF
+                                                    val outName = "converted_$ts.pdf"
+                                                    val outUri = TxtToPdf.convert(context, uri, outName)
+                                                    ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                                }
+                                            }
                                         }
                                     }
                                 }

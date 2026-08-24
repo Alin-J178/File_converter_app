@@ -293,6 +293,8 @@ private fun FileTile(
         "HEIF", "HEIC" -> Color(0xFF7E57C2)
         "AVIF" -> Color(0xFF00897B)
         "SVG" -> Color(0xFFEF6C00)
+        "XLSX" -> Color(0xFF217346)
+        "PPTX" -> Color(0xFFD04423)
         else -> colors.muted
     }
 

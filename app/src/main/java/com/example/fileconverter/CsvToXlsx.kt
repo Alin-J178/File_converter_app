@@ -160,18 +160,18 @@ object CsvToXlsx {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, displayName)
                 put(MediaStore.Downloads.MIME_TYPE, mime)
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/FileConverter")
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/FileConverter")
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
             val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL), values)
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                 ?: error("Failed to create MediaStore entry")
             resolver.openOutputStream(uri)?.use { it.write(bytes) }
                 ?: error("Failed to open output stream")
             resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
             uri
         } else {
-            val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "FileConverter")
+            val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "FileConverter")
             if (!dir.exists() && !dir.mkdirs()) error("Failed to create output directory")
             val file = File(dir, displayName)
             FileOutputStream(file).use { it.write(bytes) }

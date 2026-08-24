@@ -8,6 +8,8 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ImageDecoder
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
@@ -99,7 +101,11 @@ object ImageConverter {
                 name.endsWith(".svg", ignoreCase = true) ->
                     decodeSvg(context, uri, maxDim)
                 name.endsWith(".avif", ignoreCase = true) ->
-                    decodeSampledBitmap(context, uri, maxDim = maxDim) // our AVIF encoder uses WebP_LOSSY fallback
+                    decodeSampledBitmap(context, uri, maxDim = maxDim)
+                name.endsWith(".xlsx", ignoreCase = true) ->
+                    renderDocThumbnail(context, uri, name, "XLSX", maxDim)
+                name.endsWith(".pptx", ignoreCase = true) ->
+                    renderDocThumbnail(context, uri, name, "PPTX", maxDim)
                 else ->
                     decodeSampledBitmap(context, uri, maxDim = maxDim)
             }
@@ -407,6 +413,130 @@ object ImageConverter {
         } catch (e: Exception) {
             null
         }
+    }
+
+    /**
+     * Renders a thumbnail for document formats (XLSX, PPTX) by extracting text
+     * and drawing it on a bitmap. Shows a colored label at the top and
+     * extracted text content below.
+     */
+    private fun renderDocThumbnail(context: Context, uri: Uri, name: String, format: String, maxDim: Int = 128): Bitmap? {
+        return try {
+            val input = context.contentResolver.openInputStream(uri) ?: return null
+            val bytes = input.use { it.readBytes() }
+            if (bytes.isEmpty()) return null
+
+            val bgColor = when (format) {
+                "XLSX" -> 0xFF217346.toInt()
+                "PPTX" -> 0xFFD04423.toInt()
+                else -> 0xFF4472C4.toInt()
+            }
+
+            val text = when (format) {
+                "XLSX" -> extractXlsxPreviewText(bytes)
+                "PPTX" -> extractPptxPreviewText(bytes)
+                else -> name
+            }
+
+            val size = maxDim
+            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+
+            // Background
+            canvas.drawColor(Color.WHITE)
+
+            // Colored header bar
+            val headerPaint = Paint().apply { color = bgColor; isAntiAlias = true }
+            canvas.drawRect(0f, 0f, size.toFloat(), size * 0.3f, headerPaint)
+
+            // Format label
+            val labelPaint = Paint().apply {
+                this.color = Color.WHITE.toInt()
+                textSize = size * 0.14f
+                typeface = Typeface.DEFAULT_BOLD
+                isAntiAlias = true
+                textAlign = Paint.Align.CENTER
+            }
+            canvas.drawText(format, size / 2f, size * 0.2f, labelPaint)
+
+            // Text content preview
+            val textPaint = Paint().apply {
+                this.color = Color.DKGRAY.toInt()
+                textSize = size * 0.08f
+                isAntiAlias = true
+            }
+            val maxTextWidth = size * 0.85f
+            val startY = size * 0.4f
+            val lineHeight = size * 0.1f
+            var y = startY
+            for (line in text.lines().take(8)) {
+                if (y > size - lineHeight) break
+                if (line.isNotBlank()) {
+                    val truncated = if (textPaint.measureText(line) > maxTextWidth) {
+                        var end = line.length
+                        while (end > 0 && textPaint.measureText(line.substring(0, end) + "…") > maxTextWidth) end--
+                        line.substring(0, end.coerceAtLeast(1)) + "…"
+                    } else line
+                    canvas.drawText(truncated, size * 0.075f, y, textPaint)
+                }
+                y += lineHeight
+            }
+
+            bmp
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun extractXlsxPreviewText(data: ByteArray): String {
+        return try {
+            val sb = StringBuilder()
+            java.util.zip.ZipInputStream(data.inputStream()).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    if (entry.name == "xl/worksheets/sheet1.xml") {
+                        val xml = zip.readBytes().toString(Charsets.UTF_8)
+                        // Extract cell values
+                        val regex = Regex("<v>([^<]+)</v>")
+                        for (match in regex.findAll(xml)) {
+                            val v = match.groupValues[1]
+                            if (sb.isNotEmpty()) sb.append("  ")
+                            sb.append(v)
+                            if (sb.length > 200) break
+                        }
+                        break
+                    }
+                    entry = zip.nextEntry
+                }
+            }
+            sb.toString().ifEmpty { "Empty spreadsheet" }
+        } catch (_: Exception) { "XLSX document" }
+    }
+
+    private fun extractPptxPreviewText(data: ByteArray): String {
+        return try {
+            val sb = StringBuilder()
+            java.util.zip.ZipInputStream(data.inputStream()).use { zip ->
+                var entry = zip.nextEntry
+                var slideCount = 0
+                while (entry != null) {
+                    if (entry.name.startsWith("ppt/slides/slide") && entry.name.endsWith(".xml")) {
+                        slideCount++
+                        val xml = zip.readBytes().toString(Charsets.UTF_8)
+                        val textRegex = Regex("<a:t>([^<]+)</a:t>")
+                        for (match in textRegex.findAll(xml)) {
+                            if (sb.isNotEmpty()) sb.append(" ")
+                            sb.append(match.groupValues[1])
+                            if (sb.length > 200) break
+                        }
+                        if (sb.length > 200) break
+                    }
+                    entry = zip.nextEntry
+                }
+                if (sb.isEmpty()) sb.append("$slideCount slide(s)")
+            }
+            sb.toString()
+        } catch (_: Exception) { "PPTX presentation" }
     }
 
     /**
@@ -1081,7 +1211,7 @@ object ImageConverter {
 
     // ── Shared helper for raw-bytes formats ────────────────────────
 
-    private fun saveBytesToMediaStore(context: Context, bytes: ByteArray, displayName: String, mime: String): Uri {
+    internal fun saveBytesToMediaStore(context: Context, bytes: ByteArray, displayName: String, mime: String): Uri {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
