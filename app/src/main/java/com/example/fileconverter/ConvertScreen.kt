@@ -73,6 +73,8 @@ fun ConvertScreen(
     onDocRun: () -> Unit = {},
     busy: Boolean = false,
     docBusy: Boolean = false,
+    selectedDocOutput: String = "PDF",
+    onDocOutputSelected: (String) -> Unit = {},
     favouriteFormats: Set<OutputFormat> = emptySet(),
     onToggleFavourite: (OutputFormat) -> Unit = {},
 ) {
@@ -168,6 +170,8 @@ fun ConvertScreen(
                 onPickDocs = onPickDocs,
                 onRun = onDocRun,
                 busy = docBusy,
+                selectedDocOutput = selectedDocOutput,
+                onDocOutputSelected = onDocOutputSelected,
                 favouriteFormats = favouriteFormats,
                 onToggleFavourite = onToggleFavourite,
             )
@@ -243,6 +247,26 @@ private fun ImageConvertOverlay(
                         )
                     }
                 }
+
+                // Supported input formats (depends on selected output)
+                val imageSupportedInput = when (selectedFormat) {
+                    OutputFormat.JPEG -> "PNG • WebP • GIF • BMP • TIFF • HEIF • AVIF • SVG"
+                    OutputFormat.PNG -> "JPEG • WebP • GIF • BMP • TIFF • HEIF • AVIF • SVG"
+                    OutputFormat.WEBP -> "JPEG • PNG • GIF • BMP • TIFF • HEIF • AVIF • SVG"
+                    OutputFormat.GIF -> "JPEG • PNG • WebP • BMP • TIFF • HEIF • AVIF • SVG"
+                    OutputFormat.BMP -> "JPEG • PNG • WebP • GIF • TIFF • HEIF • AVIF • SVG"
+                    OutputFormat.TIFF -> "JPEG • PNG • WebP • GIF • BMP • HEIF • AVIF • SVG"
+                    OutputFormat.HEIF -> "JPEG • PNG • WebP • GIF • BMP • TIFF • AVIF • SVG"
+                    OutputFormat.AVIF -> "JPEG • PNG • WebP • GIF • BMP • TIFF • HEIF • SVG"
+                    OutputFormat.SVG -> "JPEG • PNG • WebP • GIF • BMP • TIFF • HEIF • AVIF"
+                    OutputFormat.PDF, null -> "JPEG • PNG • WebP • GIF • BMP • TIFF • HEIF • AVIF • SVG"
+                }
+                Text(
+                    text = "Converts to ${selectedFormat?.label ?: "?"} from: $imageSupportedInput",
+                    color = colors.onSurface.copy(alpha = 0.6f),
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp,
+                )
 
                 // Image preview strip
                 if (pickedBitmaps.isNotEmpty()) {
@@ -403,6 +427,8 @@ private fun DocConvertOverlay(
     onPickDocs: () -> Unit,
     onRun: () -> Unit,
     busy: Boolean,
+    selectedDocOutput: String = "PDF",
+    onDocOutputSelected: (String) -> Unit = {},
     favouriteFormats: Set<OutputFormat> = emptySet(),
     onToggleFavourite: (OutputFormat) -> Unit = {},
 ) {
@@ -533,34 +559,79 @@ private fun DocConvertOverlay(
                     }
                 }
 
-                // PDF format button (only option)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(buttonShape)
-                        .background(colors.blue)
-                        .border(2.dp, colors.border, buttonShape)
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
+                // Supported input formats (depends on selected output)
+                val docSupportedInput = when (selectedDocOutput) {
+                    "PDF" -> "DOC/DOCX • TXT • RTF • MD • HTML • ODT • CSV • PPT • Images"
+                    "XLSX" -> "CSV"
+                    "PPTX" -> "PPT"
+                    else -> "DOC/DOCX • TXT • RTF • MD • HTML • ODT • CSV • PPT • Images"
+                }
+                Text(
+                    text = "Converts to $selectedDocOutput from:",
+                    color = colors.onSurface.copy(alpha = 0.7f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = docSupportedInput,
+                    color = colors.onSurface,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                )
+
+                // Output format options
+                Text(
+                    text = "Output:",
+                    color = colors.onSurface.copy(alpha = 0.7f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                
+                val docFormats = listOf(
+                    Pair("PDF", colors.blue),
+                    Pair("XLSX", Color(0xFF217346)),
+                    Pair("PPTX", Color(0xFFD04423)),
+                )
+                docFormats.forEach { (label, color) ->
+                    val isSelected = selectedDocOutput == label
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(buttonShape)
+                            .background(if (isSelected) color else colors.surface)
+                            .border(2.dp, colors.border, buttonShape)
+                            .clickable { onDocOutputSelected(label) }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
                     ) {
-                        Text(
-                            text = "PDF",
-                            color = colors.onSurface,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Icon(
-                            Icons.Filled.Check,
-                            contentDescription = "Selected",
-                            tint = colors.onSurface,
-                            modifier = Modifier.size(20.dp),
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = label,
+                                color = colors.onSurface,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (isSelected) {
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = "Selected",
+                                    tint = colors.onSurface,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
                     }
                 }
+
+                // Format note
+                Text(
+                    text = "Text docs → PDF • CSV → XLSX • PPT → PPTX",
+                    color = colors.onSurface.copy(alpha = 0.5f),
+                    fontSize = 10.sp,
+                )
 
                 Spacer(modifier = Modifier.height(4.dp))
 
