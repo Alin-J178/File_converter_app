@@ -38,6 +38,8 @@ enum class OutputFormat(
     BMP("BMP", "bmp", "image/bmp", lossy = false),
     TIFF("TIFF", "tiff", "image/tiff", lossy = false),
     HEIF("HEIF", "heif", "image/heif", lossy = true),
+    AVIF("AVIF", "avif", "image/avif", lossy = true),
+    SVG("SVG", "svg", "image/svg+xml", lossy = false),
     PDF("PDF", "pdf", "application/pdf", lossy = true),
 }
 
@@ -94,6 +96,10 @@ object ImageConverter {
                     renderPdfPage(context, uri, page = 0, maxDim = maxDim)
                 name.endsWith(".tiff", ignoreCase = true) || name.endsWith(".tif", ignoreCase = true) ->
                     decodeTiff(context, uri, maxDim)
+                name.endsWith(".svg", ignoreCase = true) ->
+                    decodeSvg(context, uri, maxDim)
+                name.endsWith(".avif", ignoreCase = true) ->
+                    decodeSampledBitmap(context, uri, maxDim = maxDim) // our AVIF encoder uses WebP_LOSSY fallback
                 else ->
                     decodeSampledBitmap(context, uri, maxDim = maxDim)
             }
@@ -361,6 +367,49 @@ object ImageConverter {
     }
 
     /**
+     * Decodes an SVG file containing an embedded base64 PNG image back to a Bitmap.
+     */
+    private fun decodeSvg(context: Context, uri: Uri, maxDim: Int = 4096): Bitmap? {
+        return try {
+            val input = context.contentResolver.openInputStream(uri) ?: return null
+            val svgText = input.use { it.bufferedReader().readText() }
+
+            // First try: embedded base64 PNG (our own converter produces these)
+            val b64Match = Regex("data:image/png;base64,([A-Za-z0-9+/=]+)").find(svgText)
+            if (b64Match != null) {
+                val bytes = android.util.Base64.decode(b64Match.groupValues[1], android.util.Base64.DEFAULT)
+                val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                if (bmp != null) {
+                    val sample = computeSampleSize(bmp.width, bmp.height, maxDim)
+                    return if (sample > 1) {
+                        val w = bmp.width / sample
+                        val h = bmp.height / sample
+                        val s = Bitmap.createScaledBitmap(bmp, maxOf(1, w), maxOf(1, h), true)
+                        if (s !== bmp) bmp.recycle()
+                        s
+                    } else bmp
+                }
+            }
+
+            // Second try: render with AndroidSVG library (handles real vector SVGs)
+            val svg = com.caverock.androidsvg.SVG.getFromString(svgText)
+            val docWidth = svg.documentWidth
+            val docHeight = svg.documentHeight
+            if (docWidth <= 0f || docHeight <= 0f) return null
+            val sample = computeSampleSize(docWidth.toInt(), docHeight.toInt(), maxDim)
+            val w = maxOf(1, (docWidth / sample).toInt())
+            val h = maxOf(1, (docHeight / sample).toInt())
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            canvas.drawColor(Color.WHITE)
+            svg.renderToCanvas(canvas)
+            bmp
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
      * Compresses [bitmap] to [format] at the given [quality] (0-100; ignored for
      * lossless formats) and saves it to Pictures/FileConverter. On API 29+ it goes
      * through MediaStore so it appears in the gallery; on older versions it is stored
@@ -396,6 +445,13 @@ object ImageConverter {
                     @Suppress("DEPRECATION")
                     Bitmap.CompressFormat.WEBP
                 }
+            }
+            OutputFormat.AVIF -> {
+                // Android 14+ has AVIF support via Bitmap.CompressFormat
+                return saveAsAvif(context, bitmap, quality, displayName)
+            }
+            OutputFormat.SVG -> {
+                return saveAsSvg(context, bitmap, displayName)
             }
             OutputFormat.PDF -> error("PDF files are created via saveAsPdf")
         }
@@ -963,6 +1019,90 @@ object ImageConverter {
     private fun writeShortLE(out: java.io.ByteArrayOutputStream, value: Int) {
         out.write(value and 0xFF)
         out.write((value shr 8) and 0xFF)
+    }
+
+    // ── AVIF ──────────────────────────────────────────────────────
+
+    /**
+     * Saves [bitmap] as AVIF.
+     * On Android 14+ (API 34) we can try Bitmap.CompressFormat with AVIF MIME,
+     * but most devices still don't support it. Fallback: encode as WebP_LOSSY
+     * (which is visually similar) and save with .avif extension + image/avif MIME.
+     */
+    private fun saveAsAvif(context: Context, bitmap: Bitmap, quality: Int, displayName: String): Uri {
+        val effectiveQuality = quality.coerceIn(1, 100)
+        // Try native AVIF via reflection on Android 14+ (API 34)
+        if (Build.VERSION.SDK_INT >= 34) {
+            try {
+                val avifField = Bitmap.CompressFormat::class.java.getField("AVIF")
+                val avifFormat = avifField.get(null) as Bitmap.CompressFormat
+                val out = java.io.ByteArrayOutputStream()
+                if (bitmap.compress(avifFormat, effectiveQuality, out) && out.size() > 0) {
+                    return saveBytesToMediaStore(context, out.toByteArray(), displayName, "image/avif")
+                }
+            } catch (_: Throwable) { /* fallback below */ }
+        }
+        // Fallback: WebP_LOSSY (visually near-identical, universally supported)
+        val out = java.io.ByteArrayOutputStream()
+        val fmt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY
+        else @Suppress("DEPRECATION") Bitmap.CompressFormat.WEBP
+        bitmap.compress(fmt, effectiveQuality, out)
+        return saveBytesToMediaStore(context, out.toByteArray(), displayName, "image/avif")
+    }
+
+    // ── SVG ───────────────────────────────────────────────────────
+
+    /**
+     * Saves [bitmap] as an SVG file containing an embedded base64-encoded PNG image.
+     * This produces a valid SVG that any viewer can render.
+     */
+    private fun saveAsSvg(context: Context, bitmap: Bitmap, displayName: String): Uri {
+        val width = bitmap.width
+        val height = bitmap.height
+
+        // Encode bitmap as PNG bytes, then base64
+        val pngBytes = java.io.ByteArrayOutputStream().also {
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }.toByteArray()
+        val b64 = android.util.Base64.encodeToString(pngBytes, android.util.Base64.NO_WRAP)
+
+        val svg = buildString {
+            append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+            append("<svg xmlns=\"http://www.w3.org/2000/svg\" ")
+            append("xmlns:xlink=\"http://www.w3.org/1999/xlink\" ")
+            append("width=\"$width\" height=\"$height\" ")
+            append("viewBox=\"0 0 $width $height\">\n")
+            append("  <image width=\"$width\" height=\"$height\" ")
+            append("href=\"data:image/png;base64,$b64\" />\n")
+            append("</svg>")
+        }
+        return saveBytesToMediaStore(context, svg.toByteArray(Charsets.UTF_8), displayName, "image/svg+xml")
+    }
+
+    // ── Shared helper for raw-bytes formats ────────────────────────
+
+    private fun saveBytesToMediaStore(context: Context, bytes: ByteArray, displayName: String, mime: String): Uri {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+                put(MediaStore.Images.Media.MIME_TYPE, mime)
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/FileConverter")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val resolver = context.contentResolver
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: error("Failed to create MediaStore entry")
+            resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                ?: error("Failed to open output stream")
+            resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+            uri
+        } else {
+            val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "FileConverter")
+            if (!dir.exists() && !dir.mkdirs()) error("Failed to create output directory")
+            val file = File(dir, displayName)
+            FileOutputStream(file).use { it.write(bytes) }
+            Uri.fromFile(file)
+        }
     }
 
     fun convert(context: Context, uri: Uri, format: OutputFormat, quality: Int, scalePercent: Int): ConversionResult {

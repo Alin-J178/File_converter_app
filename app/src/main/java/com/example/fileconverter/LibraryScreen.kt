@@ -290,6 +290,9 @@ private fun FileTile(
         "BMP" -> colors.orange
         "PDF" -> colors.pink
         "TIFF", "TIF" -> colors.brown
+        "HEIF", "HEIC" -> Color(0xFF7E57C2)
+        "AVIF" -> Color(0xFF00897B)
+        "SVG" -> Color(0xFFEF6C00)
         else -> colors.muted
     }
 

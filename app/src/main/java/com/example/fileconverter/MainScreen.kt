@@ -313,6 +313,8 @@ internal fun MainScreen(
                         OutputFormat.BMP -> BrutOrange
                         OutputFormat.TIFF -> Color(0xFF8D6E63)
                         OutputFormat.HEIF -> Color(0xFF7E57C2)
+                        OutputFormat.AVIF -> Color(0xFF00897B)
+                        OutputFormat.SVG -> Color(0xFFEF6C00)
                         OutputFormat.PDF -> C.blue
                     }
                     val bgColor = if (isSelected) accent else C.surface

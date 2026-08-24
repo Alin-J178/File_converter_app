@@ -274,6 +274,8 @@ private fun FileConverterScreen(
                 "BMP" to pieChartColors.orange,
                 "TIFF" to Color(0xFF8D6E63),
                 "HEIF" to Color(0xFF7E57C2),
+                "AVIF" to Color(0xFF00897B),
+                "SVG" to Color(0xFFEF6C00),
                 "PDF" to pieChartColors.blue,
             )
             deviceFileCounts.filter { it.value.first > 0 }.map { (label, pair) ->
@@ -327,6 +329,8 @@ private fun FileConverterScreen(
             OutputFormat.BMP -> mimeType == "image/bmp"
             OutputFormat.TIFF -> mimeType == "image/tiff"
             OutputFormat.HEIF -> mimeType == "image/heif" || mimeType == "image/heic"
+            OutputFormat.AVIF -> mimeType == "image/avif"
+            OutputFormat.SVG -> mimeType == "image/svg+xml"
             OutputFormat.PDF -> mimeType == "application/pdf"
         }
     }

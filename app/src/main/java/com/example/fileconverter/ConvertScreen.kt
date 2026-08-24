@@ -305,6 +305,8 @@ private fun ImageConvertOverlay(
                     OutputFormat.BMP to BrutOrange,
                     OutputFormat.TIFF to Color(0xFF8D6E63), // brown
                     OutputFormat.HEIF to Color(0xFF7E57C2), // deep purple
+                    OutputFormat.AVIF to Color(0xFF00897B), // teal
+                    OutputFormat.SVG to Color(0xFFEF6C00), // orange
                 )
 
                 @OptIn(ExperimentalFoundationApi::class)
