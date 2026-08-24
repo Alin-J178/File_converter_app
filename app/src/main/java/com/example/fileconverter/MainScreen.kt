@@ -74,6 +74,8 @@ internal fun MainScreen(
     onPickFileForFavourite: () -> Unit,
     onFavouriteConvert: () -> Unit,
     onRemoveFavouriteFile: (Int) -> Unit = {},
+    onQualityChange: (Float) -> Unit = {},
+    onScaleChange: (Int) -> Unit = {},
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
 ) {
@@ -342,46 +344,77 @@ internal fun MainScreen(
         SectionTitle("Compression")
         Text(text = "Adjust quality and resize settings for conversions", color = BrutMuted, fontSize = 13.sp)
 
-        // Quality + Resize settings card
+        // Quality + Resize settings card — adapts to selected favourite format
         NeoCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // Quality
-                val qualityLocked = outputFormat == OutputFormat.PNG
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val fmt = selectedFavouriteFormat
+
+                if (fmt == null) {
+                    // No format selected yet
                     Text(
-                        text = if (outputFormat == OutputFormat.PNG) "PNG is lossless" else "Quality: ${quality.toInt()}%",
-                        color = BrutBlack, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f),
+                        text = "Select a favourite format above to see compression options.",
+                        color = BrutMuted, fontSize = 13.sp,
                     )
-                }
-                if (!qualityLocked) {
-                    NeoSlider(value = quality, onValueChange = {}, modifier = Modifier.fillMaxWidth())
+                } else {
+                    // ── Quality section ──
+                    if (fmt.lossy) {
+                        // Lossy format — show quality slider
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "Quality: ${quality.toInt()}%",
+                                color = BrutBlack, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            // Reset button
+                            NeoButton(
+                                text = "Reset",
+                                onClick = { onQualityChange(85f) },
+                                height = 32.dp,
+                                backgroundColor = Color.White,
+                            )
+                        }
+                        NeoSlider(value = quality, onValueChange = { onQualityChange(it) }, modifier = Modifier.fillMaxWidth())
+                        Text(
+                            text = "Lower quality = smaller file. Typical: a 3 MB photo becomes ~1.5 MB at 85%, ~0.7 MB at 50%. You're at ${quality.toInt()}% \u2014 85% is a good default.",
+                            color = BrutMuted, fontSize = 12.sp,
+                        )
+                    } else {
+                        // Lossless format — no quality adjustment
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "${fmt.label} is lossless",
+                                color = BrutMuted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        Text(
+                            text = "Quality adjustment is not supported for ${fmt.label} files. The output will always be full quality.",
+                            color = BrutMuted, fontSize = 12.sp,
+                        )
+                    }
+
+                    // ── Resize section ──
+                    Text(text = "Resize", color = BrutBlack, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        listOf(100, 75, 50, 25).forEach { pct ->
+                            val selected = scalePercent == pct
+                            NeoButton(
+                                text = "$pct%",
+                                onClick = { onScaleChange(pct) },
+                                height = 40.dp,
+                                modifier = Modifier.weight(1f),
+                                backgroundColor = if (selected) BrutYellow else Color.White,
+                            )
+                        }
+                    }
+                    val (w, h) = originalDims ?: (2000 to 1500)
+                    val newW = w * scalePercent / 100
+                    val newH = h * scalePercent / 100
                     Text(
-                        text = "Lower quality = smaller file. Typical: a 3 MB photo becomes ~1.5 MB at 85%, ~0.7 MB at 50%. You're at ${quality.toInt()}% \u2014 85% is a good default.",
+                        text = "Example: $w \u00d7 $h px \u2192 $newW \u00d7 $newH px at $scalePercent%. Fewer pixels = much smaller file.",
                         color = BrutMuted, fontSize = 12.sp,
                     )
                 }
-                // Resize
-                Text(text = "Resize", color = BrutBlack, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    listOf(100, 75, 50, 25).forEach { pct ->
-                        val selected = scalePercent == pct
-                        NeoButton(
-                            text = "$pct%",
-                            onClick = {},
-                            height = 40.dp,
-                            modifier = Modifier.weight(1f),
-                            backgroundColor = if (selected) BrutYellow else Color.White,
-                        )
-                    }
-                }
-                val (w, h) = originalDims ?: (2000 to 1500)
-                val newW = w * scalePercent / 100
-                val newH = h * scalePercent / 100
-                Text(
-                    text = "Example: $w \u00d7 $h px \u2192 $newW \u00d7 $newH px at $scalePercent%. Fewer pixels = much smaller file.",
-                    color = BrutMuted, fontSize = 12.sp,
-                )
             }
         }
 

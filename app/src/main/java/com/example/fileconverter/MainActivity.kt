@@ -752,6 +752,12 @@ private fun FileConverterScreen(
                         }
                     }
                 },
+                onQualityChange = { newQuality ->
+                    quality = newQuality.coerceIn(1f, 100f)
+                },
+                onScaleChange = { newScale ->
+                    scalePercent = newScale
+                },
                 onFormatTap = { format ->
                     formatFilter = format
                     filteredThumbs.clear()
