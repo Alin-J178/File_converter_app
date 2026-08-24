@@ -744,6 +744,14 @@ private fun FileConverterScreen(
                         favouriteBusy = false
                     }
                 },
+                onRemoveFavouriteFile = { index ->
+                    if (index in favouritePickedUris.indices) {
+                        favouritePickedUris = favouritePickedUris.toMutableList().apply { removeAt(index) }
+                        favouritePickedBitmaps = favouritePickedBitmaps.toMutableList().apply {
+                            if (index in indices) removeAt(index)
+                        }
+                    }
+                },
                 onFormatTap = { format ->
                     formatFilter = format
                     filteredThumbs.clear()

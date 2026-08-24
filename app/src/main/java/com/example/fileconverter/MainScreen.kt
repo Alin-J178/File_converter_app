@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Folder
@@ -72,6 +73,7 @@ internal fun MainScreen(
     onFavouriteFormatSelected: (OutputFormat) -> Unit,
     onPickFileForFavourite: () -> Unit,
     onFavouriteConvert: () -> Unit,
+    onRemoveFavouriteFile: (Int) -> Unit = {},
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
 ) {
@@ -152,17 +154,37 @@ internal fun MainScreen(
                     modifier = Modifier.weight(1f),
                 ) {
                     if (selectedCount > 0 && selectedFavouriteFormat != null) {
-                        previews.take(3).forEach { bmp ->
-                            Image(
-                                bitmap = bmp.asImageBitmap(),
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .border(2.dp, BrutBlack, RoundedCornerShape(8.dp)),
-                                contentScale = ContentScale.Crop,
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
+                        previews.take(3).forEachIndexed { index, bmp ->
+                            Box(modifier = Modifier.size(38.dp)) {
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .border(2.dp, BrutBlack, RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.Crop,
+                                )
+                                // X button to remove
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(0.dp)
+                                        .size(16.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(BrutBlack.copy(alpha = 0.75f))
+                                        .clickable { onRemoveFavouriteFile(index) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "Remove",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(10.dp),
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
                         }
                         Spacer(modifier = Modifier.width(4.dp))
                         Column(modifier = Modifier.weight(1f)) {
