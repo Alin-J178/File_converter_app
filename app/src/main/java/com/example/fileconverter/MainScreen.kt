@@ -206,6 +206,24 @@ internal fun MainScreen(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                // Estimated output size
+                                val fmt = selectedFavouriteFormat
+                                val qualityFactor = if (fmt.lossy) (quality / 100f) else 1f
+                                val scaleFactor = (scalePercent / 100f) * (scalePercent / 100f)
+                                val estimatedSize = (originalSize * qualityFactor * scaleFactor).toLong()
+                                val savings = if (originalSize > 0) {
+                                    val saved = originalSize - estimatedSize
+                                    val pct = (saved * 100 / originalSize).toInt()
+                                    if (pct > 0) "saves ~$pct%" else "full size"
+                                } else ""
+                                Text(
+                                    text = "Est. output: ~${formatBytes(estimatedSize)} ($savings)",
+                                    color = if (savings.startsWith("saves")) BrutGreen else BrutMuted,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                         }
                     } else {
