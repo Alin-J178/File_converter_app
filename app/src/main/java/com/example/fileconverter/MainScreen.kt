@@ -129,18 +129,18 @@ internal fun MainScreen(
                     Icon(
                         Icons.Filled.Favorite,
                         contentDescription = null,
-                        tint = BrutMuted.copy(alpha = 0.4f),
+                        tint = C.muted.copy(alpha = 0.4f),
                         modifier = Modifier.size(28.dp),
                     )
                     Text(
                         text = "No favourites yet",
-                        color = BrutMuted,
+                        color = C.muted,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
                         text = "Long-press a format in Convert to add it here",
-                        color = BrutMuted,
+                        color = C.muted,
                         fontSize = 12.sp,
                     )
                 }
@@ -164,7 +164,7 @@ internal fun MainScreen(
                                     modifier = Modifier
                                         .size(34.dp)
                                         .clip(RoundedCornerShape(8.dp))
-                                        .border(2.dp, BrutBlack, RoundedCornerShape(8.dp)),
+                                        .border(2.dp, C.border, RoundedCornerShape(8.dp)),
                                     contentScale = ContentScale.Crop,
                                 )
                                 // X button to remove
@@ -174,14 +174,14 @@ internal fun MainScreen(
                                         .padding(0.dp)
                                         .size(16.dp)
                                         .clip(RoundedCornerShape(50))
-                                        .background(BrutBlack.copy(alpha = 0.75f))
+                                        .background(C.border.copy(alpha = 0.75f))
                                         .clickable { onRemoveFavouriteFile(index) },
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Icon(
                                         Icons.Filled.Close,
                                         contentDescription = "Remove",
-                                        tint = Color.White,
+                                        tint = C.surface,
                                         modifier = Modifier.size(10.dp),
                                     )
                                 }
@@ -192,7 +192,7 @@ internal fun MainScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = if (selectedCount == 1) "Ready to convert" else "$selectedCount files ready",
-                                color = BrutBlack,
+                                color = C.onBackground,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
@@ -201,7 +201,7 @@ internal fun MainScreen(
                             if (originalSize > 0) {
                                 Text(
                                     text = "${formatBytes(originalSize)} \u00b7 ${selectedFavouriteFormat.label} \u00b7 tap to change",
-                                    color = BrutMuted,
+                                    color = C.muted,
                                     fontSize = 12.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -218,7 +218,7 @@ internal fun MainScreen(
                                 } else ""
                                 Text(
                                     text = "Est. output: ~${formatBytes(estimatedSize)} ($savings)",
-                                    color = if (savings.startsWith("saves")) BrutGreen else BrutMuted,
+                                    color = if (savings.startsWith("saves")) C.green else C.muted,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
@@ -234,14 +234,14 @@ internal fun MainScreen(
                         Icon(
                             imageVector = icon,
                             contentDescription = null,
-                            tint = BrutBlack,
+                            tint = C.onSurface,
                             modifier = Modifier.size(26.dp),
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Pick a file to convert",
-                                color = BrutBlack,
+                                color = C.onBackground,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
@@ -249,7 +249,7 @@ internal fun MainScreen(
                             )
                             Text(
                                 text = favouriteFormats.joinToString(" \u00b7 ") { it.label },
-                                color = BrutMuted,
+                                color = C.muted,
                                 fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -267,28 +267,28 @@ internal fun MainScreen(
                             .matchParentSize()
                             .offset(x = 5.dp, y = 6.dp)
                             .clip(plusShape)
-                            .background(if (canConvert) BrutBlack else Color(0xFF9E9E9E))
+                            .background(if (canConvert) C.border else Color(0xFF9E9E9E))
                     )
                     Box(
                         modifier = Modifier
                             .matchParentSize()
                             .clip(plusShape)
-                            .background(if (canConvert) BrutYellow else Color(0xFFE3E3E3))
-                            .border(3.dp, BrutBlack, plusShape)
+                            .background(if (canConvert) C.accent else Color(0xFFE3E3E3))
+                            .border(3.dp, C.border, plusShape)
                             .clickable(enabled = canConvert, onClick = onFavouriteConvert),
                         contentAlignment = Alignment.Center,
                     ) {
                         if (busy) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(26.dp),
-                                color = BrutBlack,
+                                color = C.onSurface,
                                 strokeWidth = 3.dp,
                             )
                         } else {
                             Icon(
                                 imageVector = Icons.Filled.Add,
                                 contentDescription = "Convert",
-                                tint = if (canConvert) BrutBlack else Color(0xFF9E9E9E),
+                                tint = if (canConvert) C.onSurface else Color(0xFF9E9E9E),
                                 modifier = Modifier.size(34.dp),
                             )
                         }
@@ -306,21 +306,21 @@ internal fun MainScreen(
                     val isSelected = selectedFavouriteFormat == format
                     val chipShape = RoundedCornerShape(12.dp)
                     val accent = when (format) {
-                        OutputFormat.PNG -> BrutGreen
-                        OutputFormat.JPEG -> BrutYellow
-                        OutputFormat.WEBP -> BrutPink
-                        OutputFormat.GIF -> BrutPurple
+                        OutputFormat.PNG -> C.green
+                        OutputFormat.JPEG -> C.accent
+                        OutputFormat.WEBP -> C.pink
+                        OutputFormat.GIF -> C.purple
                         OutputFormat.BMP -> BrutOrange
                         OutputFormat.TIFF -> Color(0xFF8D6E63)
                         OutputFormat.HEIF -> Color(0xFF7E57C2)
-                        OutputFormat.PDF -> BrutBlue
+                        OutputFormat.PDF -> C.blue
                     }
-                    val bgColor = if (isSelected) accent else Color.White
+                    val bgColor = if (isSelected) accent else C.surface
                     Box(
                         modifier = Modifier
                             .clip(chipShape)
                             .background(bgColor)
-                            .border(2.dp, BrutBlack, chipShape)
+                            .border(2.dp, C.border, chipShape)
                             .clickable { onFavouriteFormatSelected(format) }
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                         contentAlignment = Alignment.Center,
@@ -330,16 +330,14 @@ internal fun MainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = format.label,
-                                color = BrutBlack,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
+                                text = format.label,color = C.onBackground,
+                                fontSize = 14.sp, fontWeight = FontWeight.Bold,
                             )
                             if (isSelected) {
                                 Icon(
                                     Icons.Filled.Check,
                                     contentDescription = "Selected",
-                                    tint = BrutBlack,
+                                    tint = C.onSurface,
                                     modifier = Modifier.size(16.dp),
                                 )
                             }
@@ -352,7 +350,7 @@ internal fun MainScreen(
             if (selectedFavouriteFormat != null && selectedCount == 0) {
                 Text(
                     text = "Tap \u201aPick a file\u201c to select ${selectedFavouriteFormat.label} files, then tap + to convert.",
-                    color = BrutMuted,
+                    color = C.muted,
                     fontSize = 13.sp,
                 )
             }
@@ -360,7 +358,7 @@ internal fun MainScreen(
 
         // Compression
         SectionTitle("Compression")
-        Text(text = "Adjust quality and resize settings for conversions", color = BrutMuted, fontSize = 13.sp)
+        Text(text = "Adjust quality and resize settings for conversions", color = C.muted, fontSize = 13.sp)
 
         // Quality + Resize settings card — adapts to selected favourite format
         NeoCard(modifier = Modifier.fillMaxWidth()) {
@@ -371,7 +369,7 @@ internal fun MainScreen(
                     // No format selected yet
                     Text(
                         text = "Select a favourite format above to see compression options.",
-                        color = BrutMuted, fontSize = 13.sp,
+                        color = C.muted, fontSize = 13.sp,
                     )
                 } else {
                     // ── Quality section ──
@@ -380,48 +378,46 @@ internal fun MainScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
                                 text = "Quality: ${quality.toInt()}%",
-                                color = BrutBlack, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                                color = C.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.weight(1f),
                             )
                             // Reset button
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(BrutYellow)
-                                    .border(2.dp, BrutBlack, RoundedCornerShape(8.dp))
+                                    .background(C.accent)
+                                    .border(2.dp, C.border, RoundedCornerShape(8.dp))
                                     .clickable { onQualityChange(85f) }
                                     .padding(horizontal = 12.dp, vertical = 6.dp),
                             ) {
                                 Text(
-                                    text = "Reset",
-                                    color = BrutBlack,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
+                                    text = "Reset",color = C.onSurface,
+                                fontSize = 12.sp, fontWeight = FontWeight.Bold,
                                 )
                             }
                         }
                         NeoSlider(value = quality, onValueChange = { onQualityChange(it) }, modifier = Modifier.fillMaxWidth())
                         Text(
                             text = "Lower quality = smaller file. Typical: a 3 MB photo becomes ~1.5 MB at 85%, ~0.7 MB at 50%. You're at ${quality.toInt()}% \u2014 85% is a good default.",
-                            color = BrutMuted, fontSize = 12.sp,
+                            color = C.muted, fontSize = 12.sp,
                         )
                     } else {
                         // Lossless format — no quality adjustment
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
                                 text = "${fmt.label} is lossless",
-                                color = BrutMuted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                                color = C.muted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.weight(1f),
                             )
                         }
                         Text(
                             text = "Quality adjustment is not supported for ${fmt.label} files. The output will always be full quality.",
-                            color = BrutMuted, fontSize = 12.sp,
+                            color = C.muted, fontSize = 12.sp,
                         )
                     }
 
                     // ── Resize section ──
-                    Text(text = "Resize", color = BrutBlack, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Resize", color = C.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         listOf(100, 75, 50, 25).forEach { pct ->
                             val selected = scalePercent == pct
@@ -430,7 +426,7 @@ internal fun MainScreen(
                                 onClick = { onScaleChange(pct) },
                                 height = 40.dp,
                                 modifier = Modifier.weight(1f),
-                                backgroundColor = if (selected) BrutYellow else Color.White,
+                                backgroundColor = if (selected) C.accent else C.surface,
                             )
                         }
                     }
@@ -439,7 +435,7 @@ internal fun MainScreen(
                     val newH = h * scalePercent / 100
                     Text(
                         text = "Example: $w \u00d7 $h px \u2192 $newW \u00d7 $newH px at $scalePercent%. Fewer pixels = much smaller file.",
-                        color = BrutMuted, fontSize = 12.sp,
+                        color = C.muted, fontSize = 12.sp,
                     )
                 }
             }

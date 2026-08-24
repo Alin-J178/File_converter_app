@@ -60,7 +60,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// ---- Neo-brutalist palette ----
+// ---- Neo-brutalist palette (kept for backward compat; prefer LocalAppColors) ----
 val BrutBlack = Color(0xFF111111)
 val BrutCream = Color(0xFFFFF3C4)
 val BrutYellow = Color(0xFFFFD400)
@@ -73,6 +73,10 @@ val BrutOrange = Color(0xFFFF9F1C)
 val BrutMuted = Color(0xFF7A7A7A)
 val BrutBrown = Color(0xFF8B6914)
 
+/** Shorthand for accessing the current theme colors. */
+val C: AppColors
+    @Composable get() = LocalAppColors.current
+
 private val NeoBorder = 3.dp
 
 /**
@@ -81,23 +85,21 @@ private val NeoBorder = 3.dp
 @Composable
 fun NeoCard(
     modifier: Modifier = Modifier,
-    backgroundColor: Color = Color.White,
-    borderColor: Color = BrutBlack,
+    backgroundColor: Color = LocalAppColors.current.card,
+    borderColor: Color = LocalAppColors.current.border,
     cornerRadius: Dp = 14.dp,
     shadowOffset: Dp = 6.dp,
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(cornerRadius)
-    // The content box is a regular child so it sizes the card; the shadow box
-    // matches that size and is offset to poke out as the hard drop shadow.
     Box(modifier = modifier) {
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .offset(x = shadowOffset, y = shadowOffset)
                 .clip(shape)
-                .background(borderColor)
+                .background(C.border)
         )
         Box(
             modifier = Modifier
@@ -128,8 +130,8 @@ fun NeoButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    backgroundColor: Color = BrutYellow,
-    contentColor: Color = BrutBlack,
+    backgroundColor: Color = C.accent,
+    contentColor: Color = C.accentText,
     enabled: Boolean = true,
     height: Dp = 52.dp,
 ) {
@@ -141,14 +143,14 @@ fun NeoButton(
                 .matchParentSize()
                 .offset(x = 5.dp, y = 6.dp)
                 .clip(shape)
-                .background(if (active) BrutBlack else Color(0xFF9E9E9E))
+                .background(if (active) C.border else Color(0xFF9E9E9E))
         )
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .clip(shape)
                 .background(if (active) backgroundColor else Color(0xFFE3E3E3))
-                .border(NeoBorder, if (active) BrutBlack else Color(0xFF9E9E9E), shape)
+                .border(NeoBorder, if (active) C.border else Color(0xFF9E9E9E), shape)
                 .clickable(enabled = active, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
@@ -171,8 +173,8 @@ fun NeoIconButton(
     contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    backgroundColor: Color = Color.White,
-    iconTint: Color = BrutBlack,
+    backgroundColor: Color = C.surface,
+    iconTint: Color = C.onSurface,
     size: Dp = 48.dp,
 ) {
     val shape = RoundedCornerShape(12.dp)
@@ -182,14 +184,14 @@ fun NeoIconButton(
                 .matchParentSize()
                 .offset(x = 4.dp, y = 5.dp)
                 .clip(shape)
-                .background(BrutBlack)
+                .background(C.border)
         )
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .clip(shape)
                 .background(backgroundColor)
-                .border(NeoBorder, BrutBlack, shape)
+                .border(NeoBorder, C.border, shape)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -224,14 +226,14 @@ fun NeoField(
                 .matchParentSize()
                 .offset(x = 5.dp, y = 6.dp)
                 .clip(shape)
-                .background(BrutBlack)
+                .background(C.border)
         )
         Row(
             modifier = Modifier
                 .matchParentSize()
                 .clip(shape)
-                .background(Color.White)
-                .border(NeoBorder, BrutBlack, shape)
+                .background(C.inputBg)
+                .border(NeoBorder, C.inputBorder, shape)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -253,7 +255,7 @@ fun NeoSlider(
     value: Float,
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
-    accent: Color = BrutYellow,
+    accent: Color = C.accent,
 ) {
     val density = LocalDensity.current
     val trackHeight = 20.dp
@@ -269,8 +271,8 @@ fun NeoSlider(
                 .fillMaxWidth()
                 .height(trackHeight)
                 .clip(trackShape)
-                .background(Color.White)
-                .border(NeoBorder, BrutBlack, trackShape)
+                .background(C.sliderTrack)
+                .border(NeoBorder, C.border, trackShape)
         )
         Box(
             modifier = Modifier
@@ -289,7 +291,7 @@ fun NeoSlider(
                 )
                 .size(thumbSize)
                 .clip(CircleShape)
-                .background(BrutBlack)
+                .background(C.border)
         )
         Box(
             modifier = Modifier
@@ -300,8 +302,8 @@ fun NeoSlider(
                 )
                 .size(thumbSize)
                 .clip(CircleShape)
-                .background(Color.White)
-                .border(NeoBorder, BrutBlack, CircleShape)
+                .background(C.surface)
+                .border(NeoBorder, C.border, CircleShape)
         )
         Box(
             modifier = Modifier
@@ -326,7 +328,7 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
         modifier = modifier,
-        color = BrutBlack,
+        color = C.onBackground,
         fontSize = 22.sp,
         fontWeight = FontWeight.Black,
     )
@@ -350,11 +352,10 @@ fun NeoPieChart(
     slices: List<PieSlice> = emptyList(),
     onSliceClick: ((String) -> Unit)? = null,
 ) {
-    val chartBg = Color(0xFFE8CFA0)
+    val chartBg = C.pieChart
     var expanded by remember { mutableStateOf(false) }
 
     Column(modifier = modifier) {
-        // Main card: donut chart + collapsible legend
         NeoCard(
             modifier = Modifier.fillMaxWidth(),
             backgroundColor = chartBg,
@@ -370,13 +371,13 @@ fun NeoPieChart(
                 if (slices.isEmpty()) {
                     // Empty state placeholder
                     DonutChart(
-                        slices = listOf(PieSlice("", 1f, BrutGrey.copy(alpha = 0.3f))),
+                        slices = listOf(PieSlice("", 1f, C.muted.copy(alpha = 0.3f))),
                         modifier = Modifier.size(130.dp),
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "No saved files yet",
-                        color = BrutMuted,
+                        color = C.muted,
                         fontSize = 14.sp,
                     )
                 } else {
@@ -423,20 +424,20 @@ fun NeoPieChart(
                                                     .size(14.dp)
                                                     .clip(RoundedCornerShape(3.dp))
                                                     .background(slice.color)
-                                                    .border(2.dp, BrutBlack, RoundedCornerShape(3.dp)),
+                                                    .border(2.dp, C.border, RoundedCornerShape(3.dp)),
                                             )
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Column {
                                                 Text(
                                                     text = "${slice.label} (${slice.value.toInt()})",
-                                                    color = BrutBlack,
+                                                    color = C.onCard,
                                                     fontSize = 14.sp,
                                                     fontWeight = FontWeight.SemiBold,
                                                 )
                                                 if (slice.sizeBytes > 0) {
                                                     Text(
                                                         text = formatBytes(slice.sizeBytes),
-                                                        color = BrutMuted,
+                                                        color = C.muted,
                                                         fontSize = 11.sp,
                                                     )
                                                 }
@@ -465,14 +466,14 @@ fun NeoPieChart(
                         .matchParentSize()
                         .offset(x = 4.dp, y = 5.dp)
                         .clip(barShape)
-                        .background(BrutBlack),
+                        .background(C.border),
                 )
                 Row(
                     modifier = Modifier
                         .matchParentSize()
                         .clip(barShape)
-                        .background(Color.White)
-                        .border(3.dp, BrutBlack, barShape)
+                        .background(C.surface)
+                        .border(3.dp, C.border, barShape)
                         .clickable { expanded = !expanded },
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
@@ -480,7 +481,7 @@ fun NeoPieChart(
                     Icon(
                         imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
                         contentDescription = if (expanded) "Collapse" else "Expand",
-                        tint = BrutBlack,
+                        tint = C.onSurface,
                         modifier = Modifier.size(28.dp),
                     )
                 }
@@ -500,6 +501,7 @@ private fun DonutChart(
     if (total <= 0f) return
 
     val animProgress = remember { Animatable(0f) }
+    val borderColor = C.border
     LaunchedEffect(slices) {
         animProgress.snapTo(0f)
         animProgress.animateTo(1f, animationSpec = tween(durationMillis = 700))
@@ -520,9 +522,9 @@ private fun DonutChart(
         slices.forEach { slice ->
             val sweep = (slice.value / total) * 360f * progress
             val gap = 2f
-            // Black outline (drawn first, slightly wider)
+            // Outline (drawn first, slightly wider)
             drawArc(
-                color = BrutBlack,
+                color = borderColor,
                 startAngle = startAngle,
                 sweepAngle = sweep - gap,
                 useCenter = false,

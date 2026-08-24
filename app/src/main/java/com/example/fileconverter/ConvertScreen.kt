@@ -76,10 +76,11 @@ fun ConvertScreen(
     favouriteFormats: Set<OutputFormat> = emptySet(),
     onToggleFavourite: (OutputFormat) -> Unit = {},
 ) {
+    val colors = LocalAppColors.current
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BrutCream),
+            .background(colors.background),
     ) {
         Column(
             modifier = Modifier
@@ -102,19 +103,19 @@ fun ConvertScreen(
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = "Convert",
-                    color = BrutBlack,
+                    color = colors.onBackground,
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Black,
                 )
             }
 
             Spacer(modifier = Modifier.height(24.dp))
-            Box(modifier = Modifier.fillMaxWidth().height(3.dp).background(BrutBlack))
+            Box(modifier = Modifier.fillMaxWidth().height(3.dp).background(colors.border))
             Spacer(modifier = Modifier.height(24.dp))
 
             Text(
                 text = "Select a category",
-                color = BrutMuted,
+                color = colors.muted,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
             )
@@ -123,7 +124,7 @@ fun ConvertScreen(
             // Image conversion card
             ConvertCategoryCard(
                 icon = Icons.Filled.Image,
-                iconBg = BrutGreen,
+                iconBg = colors.green,
                 title = "Image",
                 subtitle = "PNG, JPEG, WebP, GIF, BMP \u00b7 PDF",
                 onClick = onSelectImage,
@@ -134,7 +135,7 @@ fun ConvertScreen(
             // Document conversion card
             ConvertCategoryCard(
                 icon = Icons.Filled.Description,
-                iconBg = BrutBlue,
+                iconBg = colors.blue,
                 title = "Document",
                 subtitle = "Word, Images \u00b7 PDF",
                 onClick = onSelectDocument,
@@ -190,6 +191,7 @@ private fun ImageConvertOverlay(
     val cardShape = RoundedCornerShape(20.dp)
     val buttonShape = RoundedCornerShape(12.dp)
     val blueBg = Color(0xFF5B9BD5)
+    val colors = LocalAppColors.current
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Dim scrim
@@ -207,7 +209,7 @@ private fun ImageConvertOverlay(
                 .padding(horizontal = 28.dp)
                 .clip(cardShape)
                 .background(blueBg)
-                .border(3.dp, BrutBlack, cardShape)
+                .border(3.dp, colors.border, cardShape)
                 .clickable(enabled = false) { /* consume clicks */ }
                 .padding(16.dp),
         ) {
@@ -220,8 +222,8 @@ private fun ImageConvertOverlay(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(buttonShape)
-                        .background(Color.White)
-                        .border(2.dp, BrutBlack, buttonShape)
+                        .background(colors.surface)
+                        .border(2.dp, colors.border, buttonShape)
                         .clickable { onPickImages() }
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                 ) {
@@ -229,13 +231,13 @@ private fun ImageConvertOverlay(
                         Icon(
                             Icons.Filled.PhotoLibrary,
                             contentDescription = null,
-                            tint = BrutBlack,
+                            tint = colors.onSurface,
                             modifier = Modifier.size(20.dp),
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = "Select an image",
-                            color = BrutBlack,
+                            color = colors.onSurface,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -249,8 +251,8 @@ private fun ImageConvertOverlay(
                             .fillMaxWidth()
                             .height(120.dp)
                             .clip(buttonShape)
-                            .background(Color.White.copy(alpha = 0.5f))
-                            .border(2.dp, BrutBlack, buttonShape)
+                            .background(colors.surface.copy(alpha = 0.5f))
+                            .border(2.dp, colors.border, buttonShape)
                             .padding(8.dp),
                     ) {
                         Row(
@@ -267,7 +269,7 @@ private fun ImageConvertOverlay(
                                         modifier = Modifier
                                             .size(104.dp)
                                             .clip(RoundedCornerShape(8.dp))
-                                            .border(2.dp, BrutBlack, RoundedCornerShape(8.dp)),
+                                            .border(2.dp, colors.border, RoundedCornerShape(8.dp)),
                                         contentScale = ContentScale.Crop,
                                     )
                                     // X button to remove
@@ -277,14 +279,14 @@ private fun ImageConvertOverlay(
                                             .padding(4.dp)
                                             .size(22.dp)
                                             .clip(RoundedCornerShape(6.dp))
-                                            .background(BrutBlack.copy(alpha = 0.7f))
+                                            .background(colors.border.copy(alpha = 0.7f))
                                             .clickable { onRemoveImage(index) },
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         Icon(
                                             Icons.Filled.Close,
                                             contentDescription = "Remove",
-                                            tint = Color.White,
+                                            tint = colors.surface,
                                             modifier = Modifier.size(14.dp),
                                         )
                                     }
@@ -296,10 +298,10 @@ private fun ImageConvertOverlay(
 
                 // Format buttons
                 val formats = listOf(
-                    OutputFormat.PNG to BrutGreen,
-                    OutputFormat.JPEG to BrutYellow,
-                    OutputFormat.WEBP to BrutPink,
-                    OutputFormat.GIF to BrutPurple,
+                    OutputFormat.PNG to colors.green,
+                    OutputFormat.JPEG to colors.accent,
+                    OutputFormat.WEBP to colors.pink,
+                    OutputFormat.GIF to colors.purple,
                     OutputFormat.BMP to BrutOrange,
                     OutputFormat.TIFF to Color(0xFF8D6E63), // brown
                     OutputFormat.HEIF to Color(0xFF7E57C2), // deep purple
@@ -309,15 +311,15 @@ private fun ImageConvertOverlay(
                 formats.forEach { (format, color) ->
                     val isSelected = selectedFormat == format
                     val isFavourite = format in favouriteFormats
-                    val bgColor = if (isSelected) color else Color.White
-                    val textColor = if (isSelected) BrutBlack else BrutBlack
+                    val bgColor = if (isSelected) color else colors.surface
+                    val textColor = colors.onSurface
 
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(buttonShape)
                             .background(bgColor)
-                            .border(2.dp, BrutBlack, buttonShape)
+                            .border(2.dp, colors.border, buttonShape)
                             .combinedClickable(
                                 onClick = { onFormatSelected(format) },
                                 onLongClick = { onToggleFavourite(format) },
@@ -351,7 +353,7 @@ private fun ImageConvertOverlay(
                                     Icon(
                                         Icons.Filled.Check,
                                         contentDescription = "Selected",
-                                        tint = BrutBlack,
+                                        tint = colors.onSurface,
                                         modifier = Modifier.size(20.dp),
                                     )
                                 }
@@ -364,8 +366,8 @@ private fun ImageConvertOverlay(
 
                 // Run button (fixed at bottom)
                 val runEnabled = selectedFormat != null && pickedBitmaps.isNotEmpty() && !busy
-                val runBg = if (runEnabled) BrutGreen else BrutGrey.copy(alpha = 0.4f)
-                val runBorder = if (runEnabled) BrutBlack else BrutGrey
+                val runBg = if (runEnabled) colors.green else colors.muted.copy(alpha = 0.4f)
+                val runBorder = if (runEnabled) colors.border else colors.muted
 
                 Box(
                     modifier = Modifier
@@ -379,7 +381,7 @@ private fun ImageConvertOverlay(
                 ) {
                     Text(
                         text = if (busy) "Converting..." else "Run",
-                        color = BrutBlack,
+                        color = colors.onSurface,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
@@ -405,6 +407,7 @@ private fun DocConvertOverlay(
     val cardShape = RoundedCornerShape(20.dp)
     val buttonShape = RoundedCornerShape(12.dp)
     val blueBg = Color(0xFF5B9BD5)
+    val colors = LocalAppColors.current
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Dim scrim
@@ -422,7 +425,7 @@ private fun DocConvertOverlay(
                 .padding(horizontal = 28.dp)
                 .clip(cardShape)
                 .background(blueBg)
-                .border(3.dp, BrutBlack, cardShape)
+                .border(3.dp, colors.border, cardShape)
                 .clickable(enabled = false) { /* consume clicks */ }
                 .padding(16.dp),
         ) {
@@ -435,8 +438,8 @@ private fun DocConvertOverlay(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(buttonShape)
-                        .background(Color.White)
-                        .border(2.dp, BrutBlack, buttonShape)
+                        .background(colors.surface)
+                        .border(2.dp, colors.border, buttonShape)
                         .clickable { onPickDocs() }
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                 ) {
@@ -444,13 +447,13 @@ private fun DocConvertOverlay(
                         Icon(
                             Icons.Filled.InsertDriveFile,
                             contentDescription = null,
-                            tint = BrutBlack,
+                            tint = colors.onSurface,
                             modifier = Modifier.size(20.dp),
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = "Select Document/Image",
-                            color = BrutBlack,
+                            color = colors.onSurface,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -464,8 +467,8 @@ private fun DocConvertOverlay(
                             .fillMaxWidth()
                             .height(120.dp)
                             .clip(buttonShape)
-                            .background(Color.White.copy(alpha = 0.5f))
-                            .border(2.dp, BrutBlack, buttonShape)
+                            .background(colors.surface.copy(alpha = 0.5f))
+                            .border(2.dp, colors.border, buttonShape)
                             .padding(8.dp),
                     ) {
                         Row(
@@ -482,7 +485,7 @@ private fun DocConvertOverlay(
                                         modifier = Modifier
                                             .size(104.dp)
                                             .clip(RoundedCornerShape(8.dp))
-                                            .border(2.dp, BrutBlack, RoundedCornerShape(8.dp)),
+                                            .border(2.dp, colors.border, RoundedCornerShape(8.dp)),
                                         contentScale = ContentScale.Crop,
                                     )
                                     // X button to remove
@@ -492,14 +495,14 @@ private fun DocConvertOverlay(
                                             .padding(4.dp)
                                             .size(22.dp)
                                             .clip(RoundedCornerShape(6.dp))
-                                            .background(BrutBlack.copy(alpha = 0.7f))
+                                            .background(colors.border.copy(alpha = 0.7f))
                                             .clickable { onRemoveItem(index) },
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         Icon(
                                             Icons.Filled.Close,
                                             contentDescription = "Remove",
-                                            tint = Color.White,
+                                            tint = colors.surface,
                                             modifier = Modifier.size(14.dp),
                                         )
                                     }
@@ -509,13 +512,13 @@ private fun DocConvertOverlay(
                                             modifier = Modifier
                                                 .align(Alignment.BottomCenter)
                                                 .fillMaxWidth()
-                                                .background(BrutBlack.copy(alpha = 0.6f))
+                                                .background(colors.border.copy(alpha = 0.6f))
                                                 .padding(horizontal = 4.dp, vertical = 2.dp),
                                             contentAlignment = Alignment.Center,
                                         ) {
                                             Text(
                                                 text = pickedNames[index].take(12) + if (pickedNames[index].length > 12) "..." else "",
-                                                color = Color.White,
+                                                color = colors.surface,
                                                 fontSize = 9.sp,
                                                 fontWeight = FontWeight.Medium,
                                                 maxLines = 1,
@@ -533,8 +536,8 @@ private fun DocConvertOverlay(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(buttonShape)
-                        .background(BrutBlue)
-                        .border(2.dp, BrutBlack, buttonShape)
+                        .background(colors.blue)
+                        .border(2.dp, colors.border, buttonShape)
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                 ) {
                     Row(
@@ -544,14 +547,14 @@ private fun DocConvertOverlay(
                     ) {
                         Text(
                             text = "PDF",
-                            color = BrutBlack,
+                            color = colors.onSurface,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Icon(
                             Icons.Filled.Check,
                             contentDescription = "Selected",
-                            tint = BrutBlack,
+                            tint = colors.onSurface,
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -561,8 +564,8 @@ private fun DocConvertOverlay(
 
                 // Run button
                 val runEnabled = pickedBitmaps.isNotEmpty() && !busy
-                val runBg = if (runEnabled) BrutGreen else BrutGrey.copy(alpha = 0.4f)
-                val runBorder = if (runEnabled) BrutBlack else BrutGrey
+                val runBg = if (runEnabled) colors.green else colors.muted.copy(alpha = 0.4f)
+                val runBorder = if (runEnabled) colors.border else colors.muted
 
                 Box(
                     modifier = Modifier
@@ -576,7 +579,7 @@ private fun DocConvertOverlay(
                 ) {
                     Text(
                         text = if (busy) "Converting..." else "Run",
-                        color = BrutBlack,
+                        color = colors.onSurface,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
@@ -596,9 +599,10 @@ private fun ConvertCategoryCard(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    val cardBg = if (enabled) Color.White else Color.White.copy(alpha = 0.5f)
-    val borderColor = if (enabled) BrutBlack else BrutGrey
-    val titleColor = if (enabled) BrutBlack else BrutMuted
+    val colors = LocalAppColors.current
+    val cardBg = if (enabled) colors.surface else colors.surface.copy(alpha = 0.5f)
+    val borderColor = if (enabled) colors.border else colors.muted
+    val titleColor = if (enabled) colors.onSurface else colors.muted
 
     Row(
         modifier = Modifier
@@ -615,18 +619,18 @@ private fun ConvertCategoryCard(
                 .size(44.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .background(iconBg)
-                .border(2.dp, BrutBlack, RoundedCornerShape(12.dp)),
+                .border(2.dp, colors.border, RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = BrutBlack, modifier = Modifier.size(22.dp))
+            Icon(icon, contentDescription = null, tint = colors.onSurface, modifier = Modifier.size(22.dp))
         }
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = titleColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(subtitle, color = BrutMuted, fontSize = 12.sp)
+            Text(subtitle, color = colors.muted, fontSize = 12.sp)
         }
         if (enabled) {
-            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = BrutBlack, modifier = Modifier.size(22.dp))
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = colors.onSurface, modifier = Modifier.size(22.dp))
         }
     }
 }

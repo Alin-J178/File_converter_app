@@ -112,6 +112,7 @@ private fun FileConverterScreen(
     var results by remember { mutableStateOf<List<ConversionResult>>(emptyList()) }
     var outputFormat by remember { mutableStateOf(OutputFormat.JPEG) }
     var showSettings by remember { mutableStateOf(false) }
+    var showSettingsScreen by remember { mutableStateOf(false) }
     var showConvertScreen by remember { mutableStateOf(false) }
     var showImagePicker by remember { mutableStateOf(false) }
     var pickedImageUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
@@ -166,6 +167,16 @@ private fun FileConverterScreen(
     fun toggleFavourite(format: OutputFormat) {
         favouriteFormats = if (format in favouriteFormats) favouriteFormats - format else favouriteFormats + format
         prefs.edit().putStringSet("favourite_formats", favouriteFormats.map { it.name }.toSet()).apply()
+    }
+
+    // Theme — persisted in SharedPreferences
+    var themeMode by remember {
+        mutableStateOf(
+            run {
+                val saved = prefs.getString("theme_mode", "SYSTEM") ?: "SYSTEM"
+                runCatching { ThemeMode.valueOf(saved) }.getOrNull() ?: ThemeMode.SYSTEM
+            }
+        )
     }
 
     // Device-wide file counts from MediaStore (images + PDFs on the whole phone)
@@ -252,20 +263,21 @@ private fun FileConverterScreen(
 
     // Pie-chart slices: device-wide counts from MediaStore
     // (includes app-converted files since they're indexed in MediaStore too)
+    val pieChartColors = LocalAppColors.current
     val pieChartSlices by remember {
         derivedStateOf {
             val colorMap = mapOf(
-                "PNG" to BrutGreen,
-                "JPEG" to BrutYellow,
-                "WebP" to BrutPink,
-                "GIF" to BrutPurple,
-                "BMP" to BrutOrange,
+                "PNG" to pieChartColors.green,
+                "JPEG" to pieChartColors.accent,
+                "WebP" to pieChartColors.pink,
+                "GIF" to pieChartColors.purple,
+                "BMP" to pieChartColors.orange,
                 "TIFF" to Color(0xFF8D6E63),
                 "HEIF" to Color(0xFF7E57C2),
-                "PDF" to BrutBlue,
+                "PDF" to pieChartColors.blue,
             )
             deviceFileCounts.filter { it.value.first > 0 }.map { (label, pair) ->
-                PieSlice(label, pair.first.toFloat(), colorMap[label] ?: BrutGrey, sizeBytes = pair.second)
+                PieSlice(label, pair.first.toFloat(), colorMap[label] ?: pieChartColors.muted, sizeBytes = pair.second)
             }
         }
     }
@@ -550,10 +562,10 @@ private fun FileConverterScreen(
     LaunchedEffect(Unit) { refreshLibrary() }
 
     // ──────────────────────────── UI ────────────────────────────
-    // Pull-to-refresh state for the main screen
+    AppThemeProvider(themeMode = themeMode) {
     var isRefreshing by remember { mutableStateOf(false) }
 
-    Box(modifier = Modifier.fillMaxSize().background(BrutCream)) {
+    Box(modifier = Modifier.fillMaxSize().background(LocalAppColors.current.background)) {
         BackgroundBlobs()
 
         if (showConvertScreen) {
@@ -787,7 +799,19 @@ private fun FileConverterScreen(
             onDismiss = { showSettings = false },
             onConvert = { showConvertScreen = true },
             onSavedFiles = { showRecent = true },
+            onSettings = { showSettingsScreen = true },
         )
+
+        if (showSettingsScreen) {
+            SettingsScreen(
+                currentTheme = themeMode,
+                onThemeChange = { newTheme ->
+                    themeMode = newTheme
+                    prefs.edit().putString("theme_mode", newTheme.name).apply()
+                },
+                onBack = { showSettingsScreen = false },
+            )
+        }
 
 
 
@@ -941,6 +965,7 @@ private fun FileConverterScreen(
             )
         }
     }
+    } // AppThemeProvider
 }
 
 /** Decorative neo-brutalist circles peeking in from the screen corners. */
@@ -953,17 +978,18 @@ private fun BackgroundBlobs() {
         val blobPink = (sw * 0.38f).coerceAtLeast(140.dp)
         val blobPurple = (sw * 0.50f).coerceAtLeast(180.dp)
         val blobYellow = (sw * 0.34f).coerceAtLeast(120.dp)
+        val colors = LocalAppColors.current
         // Pink: top-left, mostly off-screen
         Box(
-            modifier = Modifier.offset(x = -(blobPink * 0.45f), y = -(blobPink * 0.30f)).size(blobPink).background(BrutPink, CircleShape),
+            modifier = Modifier.offset(x = -(blobPink * 0.45f), y = -(blobPink * 0.30f)).size(blobPink).background(colors.pink.copy(alpha = 0.3f), CircleShape),
         )
         // Purple: bottom-right, mostly off right edge
         Box(
-            modifier = Modifier.align(Alignment.BottomEnd).offset(x = blobPurple * 0.35f, y = blobPurple * 0.15f).size(blobPurple).background(BrutPurple, CircleShape),
+            modifier = Modifier.align(Alignment.BottomEnd).offset(x = blobPurple * 0.35f, y = blobPurple * 0.15f).size(blobPurple).background(colors.purple.copy(alpha = 0.3f), CircleShape),
         )
         // Yellow: bottom-left, mostly off left edge
         Box(
-            modifier = Modifier.align(Alignment.BottomStart).offset(x = -(blobYellow * 0.55f), y = blobYellow * 0.10f).size(blobYellow).background(BrutYellow, CircleShape),
+            modifier = Modifier.align(Alignment.BottomStart).offset(x = -(blobYellow * 0.55f), y = blobYellow * 0.10f).size(blobYellow).background(colors.accent.copy(alpha = 0.3f), CircleShape),
         )
     }
 }

@@ -76,10 +76,11 @@ internal fun LibraryScreen(
     title: String? = null,
 ) {
     val context = LocalContext.current
+    val colors = LocalAppColors.current
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BrutCream)
+            .background(colors.background)
             .zIndex(10f)
             .safeDrawingPadding(),
     ) {
@@ -97,7 +98,7 @@ internal fun LibraryScreen(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     title ?: "Saved in Storage",
-                    color = BrutBlack,
+                    color = colors.onBackground,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.weight(1f),
@@ -107,15 +108,15 @@ internal fun LibraryScreen(
                     icon = Icons.Filled.Check,
                     contentDescription = if (selectMode) "Done" else "Select",
                     onClick = onToggleSelectMode,
-                    backgroundColor = if (selectMode) BrutBlack else Color.White,
-                    iconTint = if (selectMode) Color.White else BrutBlack,
+                    backgroundColor = if (selectMode) colors.border else colors.surface,
+                    iconTint = if (selectMode) colors.surface else colors.onSurface,
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 NeoIconButton(
                     icon = Icons.Filled.Delete,
                     contentDescription = "Delete selected",
                     onClick = onDeleteSelected,
-                    backgroundColor = BrutPink,
+                    backgroundColor = colors.pink,
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 NeoIconButton(
@@ -153,16 +154,15 @@ internal fun LibraryScreen(
                     ) {
                         Text(
                             "No converted files yet \u2014 convert something first!",
-                            color = BrutMuted,
+                            color = colors.muted,
                             fontSize = 14.sp,
                         )
                     }
                 }
             } else {
                 Text(
-                    text = "${recentFiles.size} file${if (recentFiles.size != 1) "s" else ""}",
-                    color = BrutMuted,
-                    fontSize = 13.sp,
+                    text = "${recentFiles.size} file${if (recentFiles.size != 1) "s" else ""}",                            color = colors.muted,
+                            fontSize = 13.sp,
                     modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
                 )
                 LazyVerticalGrid(
@@ -215,7 +215,7 @@ internal fun LibraryScreen(
                         onClick = { onShowClearConfirm(true) },
                         modifier = Modifier.width(180.dp),
                         height = 44.dp,
-                        backgroundColor = BrutGrey,
+                        backgroundColor = colors.muted,
                     )
                 }
             }
@@ -225,12 +225,12 @@ internal fun LibraryScreen(
         if (showClearConfirm) {
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { onShowClearConfirm(false) },
-                containerColor = BrutCream,
+                containerColor = colors.background,
                 shape = RoundedCornerShape(18.dp),
                 title = {
                     Text(
                         text = "Clear All Files?",
-                        color = BrutBlack,
+                        color = colors.onBackground,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Black,
                     )
@@ -238,7 +238,7 @@ internal fun LibraryScreen(
                 text = {
                     Text(
                         text = "This will remove all ${recentFiles.size} converted files from your storage. This action cannot be undone.",
-                        color = BrutMuted,
+                        color = colors.muted,
                         fontSize = 13.sp,
                         lineHeight = 18.sp,
                     )
@@ -249,7 +249,7 @@ internal fun LibraryScreen(
                         onClick = { onShowClearConfirm(false); onClearAll() },
                         modifier = Modifier.width(120.dp),
                         height = 40.dp,
-                        backgroundColor = BrutPink,
+                        backgroundColor = colors.pink,
                     )
                 },
                 dismissButton = {
@@ -258,7 +258,7 @@ internal fun LibraryScreen(
                         onClick = { onShowClearConfirm(false) },
                         modifier = Modifier.width(120.dp),
                         height = 40.dp,
-                        backgroundColor = Color.White,
+                        backgroundColor = colors.surface,
                     )
                 },
             )
@@ -279,17 +279,18 @@ private fun FileTile(
     onThumbLoaded: ((String, Bitmap) -> Unit)?,
 ) {
     val ctx = LocalContext.current
+    val colors = LocalAppColors.current
     val isSelected = selected.contains(file.uri.toString())
     val ext = file.name.substringAfterLast('.', "").uppercase()
     val badgeColor = when (ext) {
-        "JPEG", "JPG" -> BrutYellow
-        "PNG" -> BrutBlue
-        "WEBP" -> BrutGreen
-        "GIF" -> BrutPurple
-        "BMP" -> BrutOrange
-        "PDF" -> BrutPink
-        "TIFF", "TIF" -> BrutBrown
-        else -> BrutMuted
+        "JPEG", "JPG" -> colors.accent
+        "PNG" -> colors.blue
+        "WEBP" -> colors.green
+        "GIF" -> colors.purple
+        "BMP" -> colors.orange
+        "PDF" -> colors.pink
+        "TIFF", "TIF" -> colors.brown
+        else -> colors.muted
     }
 
     // Load thumbnail on-demand when this item becomes visible
@@ -310,8 +311,8 @@ private fun FileTile(
         modifier = Modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White)
-            .border(3.dp, if (isSelected) BrutPink else BrutBlack, RoundedCornerShape(12.dp))
+            .background(colors.surface)
+            .border(3.dp, if (isSelected) colors.pink else colors.border, RoundedCornerShape(12.dp))
             .combinedClickable(
                 onClick = {
                     if (selectMode) onToggleSelect(file.uri.toString()) else onClick()
@@ -330,18 +331,18 @@ private fun FileTile(
         } else {
             // Placeholder while loading
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Image, contentDescription = null, tint = BrutMuted, modifier = Modifier.size(36.dp))
+                Icon(Icons.Filled.Image, contentDescription = null, tint = colors.muted, modifier = Modifier.size(36.dp))
             }
         }
         // Badge
         Box(
-            modifier = Modifier.align(Alignment.BottomStart).padding(4.dp).clip(RoundedCornerShape(4.dp)).background(BrutBlack).padding(horizontal = 6.dp, vertical = 2.dp),
+            modifier = Modifier.align(Alignment.BottomStart).padding(4.dp).clip(RoundedCornerShape(4.dp)).background(colors.border).padding(horizontal = 6.dp, vertical = 2.dp),
         ) {
-            Text(ext, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Text(ext, color = colors.surface, fontSize = 9.sp, fontWeight = FontWeight.Bold)
         }
         if (selectMode && isSelected) {
             Box(modifier = Modifier.fillMaxSize().background(Color(0x55FF5FA2)).clip(RoundedCornerShape(12.dp)))
-            Icon(Icons.Filled.Check, contentDescription = null, tint = Color.White, modifier = Modifier.align(Alignment.Center).size(32.dp))
+            Icon(Icons.Filled.Check, contentDescription = null, tint = colors.surface, modifier = Modifier.align(Alignment.Center).size(32.dp))
         }
     }
 }

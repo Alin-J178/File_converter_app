@@ -76,13 +76,14 @@ internal fun SettingsDrawer(
                 modifier = Modifier.fillMaxSize().background(Color(0x66000000)).clickable { onDismiss() },
             )
             val drawerShape = RoundedCornerShape(0.dp)
+            val colors = LocalAppColors.current
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
                     .width(300.dp)
                     .shadow(12.dp)
-                    .background(BrutCream)
-                    .border(3.dp, BrutBlack, drawerShape)
+                    .background(colors.drawerBg)
+                    .border(3.dp, colors.border, drawerShape)
                     .zIndex(1f)
                     .padding(24.dp)
                     .verticalScroll(rememberScrollState()),
@@ -90,32 +91,32 @@ internal fun SettingsDrawer(
                 Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
-                            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(BrutYellow).border(2.dp, BrutBlack, RoundedCornerShape(10.dp)),
+                            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(colors.accent).border(2.dp, colors.border, RoundedCornerShape(10.dp)),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text("FC", color = BrutBlack, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                            Text("FC", color = colors.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Black)
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Text("File Converter", color = BrutBlack, fontSize = 20.sp, fontWeight = FontWeight.Black)
-                            Text("v3.1", color = BrutMuted, fontSize = 12.sp)
+                            Text("File Converter", color = colors.onSurface, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                            Text("v3.1", color = colors.muted, fontSize = 12.sp)
                         }
                     }
                     Spacer(modifier = Modifier.height(24.dp))
-                    Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(BrutBlack))
+                    Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(colors.border))
                     Spacer(modifier = Modifier.height(20.dp))
                     DrawerItem(icon = Icons.Filled.SwapHoriz, label = "Convert", description = "Image, Word, PDF conversions", onClick = { onDismiss(); onConvert() })
                     Spacer(modifier = Modifier.height(4.dp))
                     DrawerItem(icon = Icons.Filled.Folder, label = "Saved Files", description = "Browse converted files", onClick = { onDismiss(); onSavedFiles() })
                     DrawerItem(icon = Icons.Filled.Settings, label = "Settings", description = "App preferences", onClick = { onDismiss(); onSettings() })
                     Spacer(modifier = Modifier.height(20.dp))
-                    Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(BrutBlack))
+                    Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(colors.border))
                     Spacer(modifier = Modifier.height(20.dp))
-                    Text("About", color = BrutBlack, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("About", color = colors.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Convert & compress images to JPEG, PNG, WebP, GIF, BMP, or PDF. Images save to Pictures/FileConverter; PDFs to Download/FileConverter.",
-                        color = BrutMuted, fontSize = 12.sp, lineHeight = 16.sp,
+                        color = colors.muted, fontSize = 12.sp, lineHeight = 16.sp,
                     )
                     Spacer(modifier = Modifier.height(20.dp))
                     NeoButton(text = "Close", onClick = onDismiss, modifier = Modifier.fillMaxWidth(), height = 44.dp)
@@ -138,6 +139,7 @@ internal fun FileInfoOverlay(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
+    val colors = LocalAppColors.current
     // Full-screen wrapper (zIndex above the library screen) hosting the dim scrim and the card.
     Box(modifier = Modifier.fillMaxSize().zIndex(11f)) {
         Box(
@@ -148,22 +150,22 @@ internal fun FileInfoOverlay(
                 .align(Alignment.Center)
                 .padding(32.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(Color.White)
-                .border(3.dp, BrutBlack, RoundedCornerShape(20.dp))
+                .background(colors.surface)
+                .border(3.dp, colors.border, RoundedCornerShape(20.dp))
                 .padding(20.dp),
         ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val ext = file.name.substringAfterLast('.', "").uppercase()
                 val badgeColor = when (ext) {
-                    "JPEG", "JPG" -> BrutYellow
-                    "PNG" -> BrutBlue
-                    "WEBP" -> BrutGreen
-                    "PDF" -> BrutPink
-                    else -> BrutMuted
+                    "JPEG", "JPG" -> colors.accent
+                    "PNG" -> colors.blue
+                    "WEBP" -> colors.green
+                    "PDF" -> colors.pink
+                    else -> colors.muted
                 }
                 Box(modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(badgeColor).padding(horizontal = 6.dp, vertical = 3.dp)) {
-                    Text(ext, color = BrutBlack, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(ext, color = colors.onSurface, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
@@ -173,15 +175,15 @@ internal fun FileInfoOverlay(
                             onValueChange = onRenameTextChange,
                             modifier = Modifier
                                 .weight(1f)
-                                .border(2.dp, BrutBlack, RoundedCornerShape(4.dp))
+                                .border(2.dp, colors.border, RoundedCornerShape(4.dp))
                                 .padding(4.dp),
-                            textStyle = TextStyle(color = BrutBlack, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                            textStyle = TextStyle(color = colors.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold),
                             singleLine = true,
                         )
                     } else {
                         Text(
                             text = file.name,
-                            color = BrutBlack, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                            color = colors.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                         )
                     }
@@ -191,15 +193,15 @@ internal fun FileInfoOverlay(
                     modifier = Modifier
                         .size(28.dp)
                         .clip(RoundedCornerShape(6.dp))
-                        .background(if (editing) BrutYellow else Color.White)
-                        .border(2.dp, BrutBlack, RoundedCornerShape(6.dp))
+                        .background(if (editing) colors.accent else colors.surface)
+                        .border(2.dp, colors.border, RoundedCornerShape(6.dp))
                         .clickable(onClick = onEditClick),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = if (editing) Icons.Filled.Check else Icons.Filled.Edit,
                         contentDescription = if (editing) "Save" else "Rename",
-                        tint = BrutBlack,
+                        tint = colors.onSurface,
                         modifier = Modifier.size(16.dp),
                     )
                 }
@@ -224,7 +226,7 @@ internal fun FileInfoOverlay(
                         context.startActivity(intent)
                     } catch (_: Exception) {}
                 }, modifier = Modifier.weight(1f), height = 40.dp)
-                NeoButton(text = "Close", onClick = onDismiss, modifier = Modifier.weight(1f), height = 40.dp, backgroundColor = Color.White)
+                NeoButton(text = "Close", onClick = onDismiss, modifier = Modifier.weight(1f), height = 40.dp, backgroundColor = colors.surface)
             }
             }
         }
@@ -234,6 +236,7 @@ internal fun FileInfoOverlay(
 /** "Conversion Complete!" dialog listing the converted files. */
 @Composable
 internal fun SuccessOverlay(results: List<ConversionResult>, onAwesome: () -> Unit) {
+    val colors = LocalAppColors.current
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier.fillMaxSize().background(Color(0x99000000)).clickable { },
@@ -245,7 +248,7 @@ internal fun SuccessOverlay(results: List<ConversionResult>, onAwesome: () -> Un
                 .padding(32.dp)
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xFF7EC8FF))
-                .border(3.dp, BrutBlack, RoundedCornerShape(24.dp))
+                .border(3.dp, colors.border, RoundedCornerShape(24.dp))
                 .padding(28.dp),
         ) {
         Column(
@@ -254,17 +257,17 @@ internal fun SuccessOverlay(results: List<ConversionResult>, onAwesome: () -> Un
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             Box(
-                modifier = Modifier.size(64.dp).clip(CircleShape).background(Color(0xFF34D399)).border(3.dp, BrutBlack, CircleShape),
+                modifier = Modifier.size(64.dp).clip(CircleShape).background(Color(0xFF34D399)).border(3.dp, colors.border, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
+                Icon(Icons.Filled.Check, contentDescription = null, tint = colors.surface, modifier = Modifier.size(36.dp))
             }
-            Text("Conversion Complete!", color = BrutBlack, fontSize = 22.sp, fontWeight = FontWeight.Black)
-            Text("Your file${if (results.size > 1) "s are" else " is"} ready.", color = BrutMuted, fontSize = 14.sp)
+            Text("Conversion Complete!", color = colors.onSurface, fontSize = 22.sp, fontWeight = FontWeight.Black)
+            Text("Your file${if (results.size > 1) "s are" else " is"} ready.", color = colors.muted, fontSize = 14.sp)
             results.forEach { r ->
                 Text(
                     text = r.path.substringAfterLast('/'),
-                    color = BrutBlack, fontSize = 12.sp,
+                    color = colors.onSurface, fontSize = 12.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -282,6 +285,7 @@ internal fun SuccessOverlay(results: List<ConversionResult>, onAwesome: () -> Un
 /** First-run onboarding pager shown until the user dismisses it. */
 @Composable
 internal fun TutorialOverlay(onFinish: () -> Unit) {
+    val colors = LocalAppColors.current
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { 4 })
     Box(
@@ -299,14 +303,14 @@ internal fun TutorialOverlay(onFinish: () -> Unit) {
             ) {
                 // Dots at top
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val dotColors = listOf(BrutYellow, BrutGreen, BrutBlue, BrutPurple)
+                    val dotColors = listOf(colors.accent, colors.green, colors.blue, colors.purple)
                     repeat(4) { i ->
                         Box(
                             modifier = Modifier
                                 .size(if (pagerState.currentPage == i) 12.dp else 8.dp)
                                 .clip(CircleShape)
-                                .background(if (pagerState.currentPage == i) dotColors[i] else BrutGrey)
-                                .border(2.dp, BrutBlack, CircleShape),
+                                .background(if (pagerState.currentPage == i) dotColors[i] else colors.muted)
+                                .border(2.dp, colors.border, CircleShape),
                         )
                     }
                 }
@@ -318,21 +322,21 @@ internal fun TutorialOverlay(onFinish: () -> Unit) {
                         verticalArrangement = Arrangement.Center,
                     ) {
                         val (icon, title, body, color) = when (page) {
-                            0 -> Quadruple(Icons.Filled.Image, "Welcome to File Converter", "Convert & compress images to JPEG, PNG, WebP, GIF, BMP or PDF. Everything stays on your device \u2014 nothing is uploaded.", BrutYellow)
-                            1 -> Quadruple(Icons.Filled.PhotoLibrary, "Convert to any format", "Pick an image, choose your target format under Convert to, then tap +. You can also convert Word documents to PDF the same way.", BrutGreen)
-                            2 -> Quadruple(Icons.Filled.PictureAsPdf, "Compress anything", "The quality slider and resize buttons apply to your selected format. Pick PNG/JPEG/WebP/GIF/BMP above, then adjust the sliders. For PDFs, tap Pick PDF to compress, adjust sliders, then tap +.", BrutBlue)
-                            else -> Quadruple(Icons.Filled.Folder, "Your converted files", "The folder icon shows your saved files. Long-press any file for details, rename, or open.", BrutPurple)
+                            0 -> Quadruple(Icons.Filled.Image, "Welcome to File Converter", "Convert & compress images to JPEG, PNG, WebP, GIF, BMP or PDF. Everything stays on your device \u2014 nothing is uploaded.", colors.accent)
+                            1 -> Quadruple(Icons.Filled.PhotoLibrary, "Convert to any format", "Pick an image, choose your target format under Convert to, then tap +. You can also convert Word documents to PDF the same way.", colors.green)
+                            2 -> Quadruple(Icons.Filled.PictureAsPdf, "Compress anything", "The quality slider and resize buttons apply to your selected format. Pick PNG/JPEG/WebP/GIF/BMP above, then adjust the sliders. For PDFs, tap Pick PDF to compress, adjust sliders, then tap +.", colors.blue)
+                            else -> Quadruple(Icons.Filled.Folder, "Your converted files", "The folder icon shows your saved files. Long-press any file for details, rename, or open.", colors.purple)
                         }
                         Box(
-                            modifier = Modifier.size(80.dp).clip(CircleShape).background(color).border(3.dp, BrutBlack, CircleShape),
+                            modifier = Modifier.size(80.dp).clip(CircleShape).background(color).border(3.dp, colors.border, CircleShape),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(icon, contentDescription = null, tint = BrutBlack, modifier = Modifier.size(40.dp))
+                            Icon(icon, contentDescription = null, tint = colors.onSurface, modifier = Modifier.size(40.dp))
                         }
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text(title, color = BrutBlack, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                        Text(title, color = colors.onSurface, fontSize = 22.sp, fontWeight = FontWeight.Black)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(body, color = BrutMuted, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 8.dp))
+                        Text(body, color = colors.muted, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 8.dp))
                     }
                 }
                 // Buttons
@@ -353,7 +357,7 @@ internal fun TutorialOverlay(onFinish: () -> Unit) {
                 if (pagerState.currentPage < 3) {
                     Text(
                         text = "Skip",
-                        color = BrutMuted,
+                        color = colors.muted,
                         fontSize = 14.sp,
                         modifier = Modifier.clickable { onFinish() },
                     )
@@ -365,28 +369,30 @@ internal fun TutorialOverlay(onFinish: () -> Unit) {
 
 @Composable
 private fun InfoRow(label: String, value: String) {
+    val colors = LocalAppColors.current
     Column {
-        Text(label, color = BrutMuted, fontSize = 11.sp)
-        Text(value, color = BrutBlack, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = colors.muted, fontSize = 11.sp)
+        Text(value, color = colors.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
 @Composable
 private fun DrawerItem(icon: ImageVector, label: String, description: String, modifier: Modifier = Modifier, onClick: () -> Unit = {}) {
+    val colors = LocalAppColors.current
     Row(
         modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onClick() }.padding(vertical = 12.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(BrutYellow).border(2.dp, BrutBlack, RoundedCornerShape(10.dp)),
+            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(colors.accent).border(2.dp, colors.border, RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = BrutBlack, modifier = Modifier.size(20.dp))
+            Icon(icon, contentDescription = null, tint = colors.onSurface, modifier = Modifier.size(20.dp))
         }
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = BrutBlack, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text(description, color = BrutMuted, fontSize = 11.sp)
+            Text(label, color = colors.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(description, color = colors.muted, fontSize = 11.sp)
         }
     }
 }
