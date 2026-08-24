@@ -366,12 +366,21 @@ internal fun MainScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             // Reset button
-                            NeoButton(
-                                text = "Reset",
-                                onClick = { onQualityChange(85f) },
-                                height = 32.dp,
-                                backgroundColor = Color.White,
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(BrutYellow)
+                                    .border(2.dp, BrutBlack, RoundedCornerShape(8.dp))
+                                    .clickable { onQualityChange(85f) }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                            ) {
+                                Text(
+                                    text = "Reset",
+                                    color = BrutBlack,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
                         }
                         NeoSlider(value = quality, onValueChange = { onQualityChange(it) }, modifier = Modifier.fillMaxWidth())
                         Text(
