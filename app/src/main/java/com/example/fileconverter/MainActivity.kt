@@ -743,30 +743,21 @@ private fun FileConverterScreen(
                                             }
                                         }
                                         // PPTX input → just copy it through (already modern format)
-                                        // PPT → PPTX or PDF
-                                        // Match by ext first (most reliable), also catch PPTX MIME type
-                                        // when ext doesn't contain pptx (file picker MIME mismatch)
-                                        ext == "ppt" ||
-                                        (mimeType == "application/vnd.ms-powerpoint" && ext != "pptx") ||
-                                        (mimeType == "application/vnd.openxmlformats-officedocument.presentationml.presentation" && ext == "ppt") -> {
-                                            if (selectedDocOutput == "PPTX") {
-                                                val outName = "converted_$ts.pptx"
-                                                val outUri = PptToPptx.convert(context, uri, outName)
-                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
-                                            } else {
-                                                val outName = "converted_$ts.pdf"
-                                                val outUri = TxtToPdf.convert(context, uri, outName)
-                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
-                                            }
-                                        }
-                                        // PPTX input → PPTX output (already modern, just copy)
-                                        ext == "pptx" ||
+                                        // PPT/PPTX → PPTX or PDF
+                                        ext == "ppt" || ext == "pptx" ||
+                                        mimeType == "application/vnd.ms-powerpoint" ||
                                         mimeType == "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> {
                                             if (selectedDocOutput == "PPTX") {
-                                                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                                                    ?: error("Could not read the PPTX file")
+                                                // Try legacy PPT parser first; if it fails, the file is already PPTX — just copy it
                                                 val outName = "converted_$ts.pptx"
-                                                val outUri = ImageConverter.saveBytesToMediaStore(context, bytes, outName, "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+                                                val outUri = try {
+                                                    PptToPptx.convert(context, uri, outName)
+                                                } catch (_: Throwable) {
+                                                    // Already PPTX — copy bytes through
+                                                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                                                        ?: error("Could not read the file")
+                                                    ImageConverter.saveBytesToMediaStore(context, bytes, outName, "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+                                                }
                                                 ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
                                             } else {
                                                 val outName = "converted_$ts.pdf"

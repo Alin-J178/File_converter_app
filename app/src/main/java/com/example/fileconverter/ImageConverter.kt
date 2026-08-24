@@ -1213,18 +1213,19 @@ object ImageConverter {
 
     internal fun saveBytesToMediaStore(context: Context, bytes: ByteArray, displayName: String, mime: String): Uri {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val isImage = mime.startsWith("image/")
             val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
-                put(MediaStore.Images.Media.MIME_TYPE, mime)
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/FileConverter")
-                put(MediaStore.Images.Media.IS_PENDING, 1)
+                put(MediaStore.Downloads.DISPLAY_NAME, displayName)
+                put(MediaStore.Downloads.MIME_TYPE, mime)
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/FileConverter")
+                put(MediaStore.Downloads.IS_PENDING, 1)
             }
             val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            val uri = resolver.insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL), values)
                 ?: error("Failed to create MediaStore entry")
             resolver.openOutputStream(uri)?.use { it.write(bytes) }
                 ?: error("Failed to open output stream")
-            resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+            resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
             uri
         } else {
             val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "FileConverter")
