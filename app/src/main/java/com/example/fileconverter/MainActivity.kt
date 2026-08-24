@@ -183,59 +183,72 @@ private fun FileConverterScreen(
     // Device-wide file counts from MediaStore (images + PDFs on the whole phone)
     var deviceFileCounts by remember { mutableStateOf<Map<String, Pair<Int, Long>>>(emptyMap()) }
 
-    // Runtime permission for reading media files on the device
+    // ── Permission flow: Tutorial → Media permission → Full file access ──
+    // Step 1: Media permission (READ_MEDIA_IMAGES / READ_EXTERNAL_STORAGE)
     val mediaPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_IMAGES
     } else {
         Manifest.permission.READ_EXTERNAL_STORAGE
     }
-    val hasMediaPermission = ContextCompat.checkSelfPermission(context, mediaPermission) == PackageManager.PERMISSION_GRANTED
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) {
-            // Re-query device file counts when permission is newly granted
-            scope.launch {
-                deviceFileCounts = withContext(Dispatchers.IO) {
-                    queryDeviceFileCounts(context)
-                }
-            }
-        }
+    var hasMediaPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, mediaPermission) == PackageManager.PERMISSION_GRANTED
+        )
     }
-    LaunchedEffect(Unit) {
-        if (!hasMediaPermission) {
-            permissionLauncher.launch(mediaPermission)
-        }
+    // Step 2: Full file access (MANAGE_EXTERNAL_STORAGE) — needed for pie chart & deletion
+    var hasFullAccess by remember {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+        )
     }
-    LaunchedEffect(hasMediaPermission) {
-        if (hasMediaPermission) {
-            deviceFileCounts = withContext(Dispatchers.IO) {
-                queryDeviceFileCounts(context)
-            }
-        }
-    }
-
-    // Full file access (MANAGE_EXTERNAL_STORAGE) — needed for PDFs in pie chart & true deletion
-    val hasFullAccess = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
     val fullAccessLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        // Re-check after returning from settings
-        val nowGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
-        if (nowGranted) {
+        hasFullAccess = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+        if (hasFullAccess) {
             Toast.makeText(context, "Full file access granted!", Toast.LENGTH_SHORT).show()
         }
-        // Re-query device file counts so PDFs appear in the pie chart
         scope.launch {
             deviceFileCounts = withContext(Dispatchers.IO) {
                 queryDeviceFileCounts(context)
             }
         }
     }
-    // Request full file access on startup so PDFs are available in the pie chart
-    LaunchedEffect(hasMediaPermission) {
-        if (hasMediaPermission && !hasFullAccess && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Toast.makeText(context, "Grant file access to show all file types in the chart", Toast.LENGTH_LONG).show()
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        hasMediaPermission = granted
+        if (granted) {
+            scope.launch {
+                deviceFileCounts = withContext(Dispatchers.IO) {
+                    queryDeviceFileCounts(context)
+                }
+            }
+            // After media permission granted, now request full file access for pie chart
+            if (!hasFullAccess && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                fullAccessLauncher.launch(intent)
+            }
+        }
+    }
+    // Kick off the permission flow after tutorial is dismissed
+    var permissionFlowStarted by remember { mutableStateOf(false) }
+    if (!showTutorial && !permissionFlowStarted) {
+        permissionFlowStarted = true
+        if (!hasMediaPermission) {
+            permissionLauncher.launch(mediaPermission)
+        } else if (!hasFullAccess && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Already have media permission, go straight to full access
             val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                 data = Uri.parse("package:${context.packageName}")
             }
             fullAccessLauncher.launch(intent)
+        }
+    }
+    // Load file counts once permissions are granted
+    LaunchedEffect(hasMediaPermission) {
+        if (hasMediaPermission) {
+            deviceFileCounts = withContext(Dispatchers.IO) {
+                queryDeviceFileCounts(context)
+            }
         }
     }
 
