@@ -73,8 +73,8 @@ fun ConvertScreen(
     onDocRun: () -> Unit = {},
     busy: Boolean = false,
     docBusy: Boolean = false,
-    selectedDocOutput: String = "PDF",
-    onDocOutputSelected: (String) -> Unit = {},
+    selectedDocOutput: String? = null,
+    onDocOutputSelected: (String?) -> Unit = {},
     favouriteFormats: Set<OutputFormat> = emptySet(),
     onToggleFavourite: (OutputFormat) -> Unit = {},
 ) {
@@ -260,6 +260,7 @@ private fun ImageConvertOverlay(
                     OutputFormat.AVIF -> "JPEG • PNG • WebP • GIF • BMP • TIFF • HEIF • SVG"
                     OutputFormat.SVG -> "JPEG • PNG • WebP • GIF • BMP • TIFF • HEIF • AVIF"
                     OutputFormat.PDF, null -> "JPEG • PNG • WebP • GIF • BMP • TIFF • HEIF • AVIF • SVG"
+                    else -> ""
                 }
                 Text(
                     text = "Converts to ${selectedFormat?.label ?: "?"} from: $imageSupportedInput",
@@ -427,8 +428,8 @@ private fun DocConvertOverlay(
     onPickDocs: () -> Unit,
     onRun: () -> Unit,
     busy: Boolean,
-    selectedDocOutput: String = "PDF",
-    onDocOutputSelected: (String) -> Unit = {},
+    selectedDocOutput: String? = null,
+    onDocOutputSelected: (String?) -> Unit = {},
     favouriteFormats: Set<OutputFormat> = emptySet(),
     onToggleFavourite: (OutputFormat) -> Unit = {},
 ) {
@@ -592,15 +593,24 @@ private fun DocConvertOverlay(
                     Pair("XLSX", Color(0xFF217346)),
                     Pair("PPTX", Color(0xFFD04423)),
                 )
+                val docFormatMap = mapOf(
+                    "PDF" to OutputFormat.PDF,
+                    "XLSX" to OutputFormat.XLSX,
+                    "PPTX" to OutputFormat.PPTX,
+                )
                 docFormats.forEach { (label, color) ->
                     val isSelected = selectedDocOutput == label
+                    val isFavourite = docFormatMap[label] in favouriteFormats
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(buttonShape)
                             .background(if (isSelected) color else colors.surface)
                             .border(2.dp, colors.border, buttonShape)
-                            .clickable { onDocOutputSelected(label) }
+                            .combinedClickable(
+                                onClick = { onDocOutputSelected(label) },
+                                onLongClick = { docFormatMap[label]?.let { onToggleFavourite(it) } },
+                            )
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                     ) {
                         Row(
@@ -614,13 +624,23 @@ private fun DocConvertOverlay(
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                             )
-                            if (isSelected) {
-                                Icon(
-                                    Icons.Filled.Check,
-                                    contentDescription = "Selected",
-                                    tint = colors.onSurface,
-                                    modifier = Modifier.size(20.dp),
-                                )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (isFavourite) {
+                                    Icon(
+                                        Icons.Filled.Favorite,
+                                        contentDescription = "Favourite",
+                                        tint = Color(0xFFE91E63),
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                                if (isSelected) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = "Selected",
+                                        tint = colors.onSurface,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
                             }
                         }
                     }

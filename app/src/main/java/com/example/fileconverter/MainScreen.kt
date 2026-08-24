@@ -296,6 +296,43 @@ internal fun MainScreen(
                 }
             }
 
+            // Convert from info (between pick bar and favourite chips)
+            if (selectedFavouriteFormat != null) {
+                val supportedInput = when (selectedFavouriteFormat) {
+                    OutputFormat.PDF -> "DOC/DOCX \u2022 TXT \u2022 RTF \u2022 MD \u2022 HTML \u2022 ODT \u2022 CSV \u2022 PPT \u2022 Images"
+                    OutputFormat.CSV -> "CSV files"
+                    OutputFormat.PPT -> "PPT files"
+                    OutputFormat.XLSX -> "CSV files"
+                    OutputFormat.PPTX -> "PPT files"
+                    OutputFormat.JPEG -> "PNG \u2022 WebP \u2022 GIF \u2022 BMP \u2022 TIFF \u2022 HEIF \u2022 AVIF \u2022 SVG"
+                    OutputFormat.PNG -> "JPEG \u2022 WebP \u2022 GIF \u2022 BMP \u2022 TIFF \u2022 HEIF \u2022 AVIF \u2022 SVG"
+                    OutputFormat.WEBP -> "JPEG \u2022 PNG \u2022 GIF \u2022 BMP \u2022 TIFF \u2022 HEIF \u2022 AVIF \u2022 SVG"
+                    OutputFormat.GIF -> "JPEG \u2022 PNG \u2022 WebP \u2022 BMP \u2022 TIFF \u2022 HEIF \u2022 AVIF \u2022 SVG"
+                    OutputFormat.BMP -> "JPEG \u2022 PNG \u2022 WebP \u2022 GIF \u2022 TIFF \u2022 HEIF \u2022 AVIF \u2022 SVG"
+                    OutputFormat.TIFF -> "JPEG \u2022 PNG \u2022 WebP \u2022 GIF \u2022 BMP \u2022 HEIF \u2022 AVIF \u2022 SVG"
+                    OutputFormat.HEIF -> "JPEG \u2022 PNG \u2022 WebP \u2022 GIF \u2022 BMP \u2022 TIFF \u2022 AVIF \u2022 SVG"
+                    OutputFormat.AVIF -> "JPEG \u2022 PNG \u2022 WebP \u2022 GIF \u2022 BMP \u2022 TIFF \u2022 HEIF \u2022 SVG"
+                    OutputFormat.SVG -> "JPEG \u2022 PNG \u2022 WebP \u2022 GIF \u2022 BMP \u2022 TIFF \u2022 HEIF \u2022 AVIF"
+                    null -> ""
+                }
+                if (supportedInput.isNotEmpty()) {
+                    Text(
+                        text = "Converts to ${selectedFavouriteFormat.label} from: $supportedInput",
+                        color = C.muted.copy(alpha = 0.7f),
+                        fontSize = 11.sp,
+                    )
+                }
+            }
+
+            // Hint text
+            if (selectedFavouriteFormat != null && selectedCount == 0) {
+                Text(
+                    text = "Tap \u201aPick a file\u201c to select files, then tap + to convert.",
+                    color = C.muted,
+                    fontSize = 13.sp,
+                )
+            }
+
             // Favourite format chips (selectable, compact, wrapping)
             androidx.compose.foundation.layout.FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -315,6 +352,10 @@ internal fun MainScreen(
                         OutputFormat.HEIF -> Color(0xFF7E57C2)
                         OutputFormat.AVIF -> Color(0xFF00897B)
                         OutputFormat.SVG -> Color(0xFFEF6C00)
+                        OutputFormat.CSV -> Color(0xFF00897B)
+                        OutputFormat.PPT -> Color(0xFFB71C1C)
+                        OutputFormat.XLSX -> Color(0xFF217346)
+                        OutputFormat.PPTX -> Color(0xFFD04423)
                         OutputFormat.PDF -> C.blue
                     }
                     val bgColor = if (isSelected) accent else C.surface
@@ -348,14 +389,6 @@ internal fun MainScreen(
                 }
             }
 
-            // Hint text
-            if (selectedFavouriteFormat != null && selectedCount == 0) {
-                Text(
-                    text = "Tap \u201aPick a file\u201c to select ${selectedFavouriteFormat.label} files, then tap + to convert.",
-                    color = C.muted,
-                    fontSize = 13.sp,
-                )
-            }
         }
 
         // Compression

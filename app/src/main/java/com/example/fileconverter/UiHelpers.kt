@@ -40,6 +40,8 @@ internal fun countFormatsByExtension(files: List<RecentFile>): Map<String, Int> 
             "SVG" -> "SVG"
             "XLSX" -> "XLSX"
             "PPTX" -> "PPTX"
+            "CSV" -> "CSV"
+            "PPT" -> "PPT"
             else -> ext.ifEmpty { "Other" }
         }
         counts[label] = (counts[label] ?: 0) + 1
@@ -98,6 +100,8 @@ internal fun queryDeviceFileCounts(context: Context): Map<String, Pair<Int, Long
         ".pdf" to "PDF",
         ".xlsx" to "XLSX",
         ".pptx" to "PPTX",
+        ".csv" to "CSV",
+        ".ppt" to "PPT",
     )
     val filesProjection = arrayOf(MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.SIZE)
     val nameCol = MediaStore.Files.FileColumns.DISPLAY_NAME
@@ -141,6 +145,8 @@ internal fun queryDeviceFilesByFormat(context: Context, formatLabel: String): Li
         "PDF" to listOf(".pdf"),
         "XLSX" to listOf(".xlsx"),
         "PPTX" to listOf(".pptx"),
+        "CSV" to listOf(".csv"),
+        "PPT" to listOf(".ppt"),
     )
 
     val collection = MediaStore.Files.getContentUri("external")

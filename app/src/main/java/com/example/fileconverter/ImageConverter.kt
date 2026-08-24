@@ -43,6 +43,10 @@ enum class OutputFormat(
     AVIF("AVIF", "avif", "image/avif", lossy = true),
     SVG("SVG", "svg", "image/svg+xml", lossy = false),
     PDF("PDF", "pdf", "application/pdf", lossy = true),
+    CSV("CSV", "csv", "text/csv", lossy = false),
+    PPT("PPT", "ppt", "application/vnd.ms-powerpoint", lossy = false),
+    XLSX("XLSX", "xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", lossy = false),
+    PPTX("PPTX", "pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", lossy = false),
 }
 
 /** A file previously saved by this app. */
@@ -106,6 +110,10 @@ object ImageConverter {
                     renderDocThumbnail(context, uri, name, "XLSX", maxDim)
                 name.endsWith(".pptx", ignoreCase = true) ->
                     renderDocThumbnail(context, uri, name, "PPTX", maxDim)
+                name.endsWith(".csv", ignoreCase = true) ->
+                    renderDocThumbnail(context, uri, name, "CSV", maxDim)
+                name.endsWith(".ppt", ignoreCase = true) ->
+                    renderDocThumbnail(context, uri, name, "PPT", maxDim)
                 else ->
                     decodeSampledBitmap(context, uri, maxDim = maxDim)
             }
@@ -429,12 +437,16 @@ object ImageConverter {
             val bgColor = when (format) {
                 "XLSX" -> 0xFF217346.toInt()
                 "PPTX" -> 0xFFD04423.toInt()
+                "CSV" -> 0xFF00897B.toInt()
+                "PPT" -> 0xFFB71C1C.toInt()
                 else -> 0xFF4472C4.toInt()
             }
 
             val text = when (format) {
                 "XLSX" -> extractXlsxPreviewText(bytes)
                 "PPTX" -> extractPptxPreviewText(bytes)
+                "CSV" -> extractCsvPreviewText(bytes)
+                "PPT" -> extractPptPreviewText(bytes)
                 else -> name
             }
 
@@ -539,6 +551,44 @@ object ImageConverter {
         } catch (_: Exception) { "PPTX presentation" }
     }
 
+    private fun extractCsvPreviewText(data: ByteArray): String {
+        return try {
+            val text = String(data, Charsets.UTF_8)
+            val lines = text.lines().take(6) // header + first 5 rows
+            lines.joinToString("\n") { line ->
+                // Show first few columns
+                val cols = line.split(",").take(4)
+                cols.joinToString(" | ") { it.take(20) }
+            }.ifEmpty { "Empty CSV" }
+        } catch (_: Exception) { "CSV document" }
+    }
+
+    private fun extractPptPreviewText(data: ByteArray): String {
+        // PPT is OLE2 binary — try to extract readable text runs
+        return try {
+            val sb = StringBuilder()
+            var run = StringBuilder()
+            for (b in data) {
+                val c = (b.toInt() and 0xFF).toChar()
+                if (c.code in 32..126 || c == '\n' || c == '\t') {
+                    run.append(c)
+                } else {
+                    if (run.length > 3) {
+                        if (sb.isNotEmpty()) sb.append(" ")
+                        sb.append(run)
+                        if (sb.length > 150) break
+                    }
+                    run = StringBuilder()
+                }
+            }
+            if (run.length > 3 && sb.length <= 150) {
+                if (sb.isNotEmpty()) sb.append(" ")
+                sb.append(run)
+            }
+            sb.toString().ifEmpty { "PPT presentation" }
+        } catch (_: Exception) { "PPT presentation" }
+    }
+
     /**
      * Compresses [bitmap] to [format] at the given [quality] (0-100; ignored for
      * lossless formats) and saves it to Pictures/FileConverter. On API 29+ it goes
@@ -584,6 +634,10 @@ object ImageConverter {
                 return saveAsSvg(context, bitmap, displayName)
             }
             OutputFormat.PDF -> error("PDF files are created via saveAsPdf")
+            OutputFormat.CSV -> error("CSV files are created via CsvToXlsx")
+            OutputFormat.PPT -> error("PPT files are converted via PptToPptx or TxtToPdf")
+            OutputFormat.XLSX -> error("XLSX files are created via CsvToXlsx")
+            OutputFormat.PPTX -> error("PPTX files are created via PptToPptx")
         }
         val effectiveQuality = if (format.lossy) quality else 100
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

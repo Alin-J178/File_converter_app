@@ -295,6 +295,8 @@ private fun FileTile(
         "SVG" -> Color(0xFFEF6C00)
         "XLSX" -> Color(0xFF217346)
         "PPTX" -> Color(0xFFD04423)
+        "CSV" -> Color(0xFF00897B)
+        "PPT" -> Color(0xFFB71C1C)
         else -> colors.muted
     }
 

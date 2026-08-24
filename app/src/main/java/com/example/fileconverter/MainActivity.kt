@@ -124,7 +124,7 @@ private fun FileConverterScreen(
     var pickedDocBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var pickedDocNames by remember { mutableStateOf<List<String>>(emptyList()) }
     var docConvertBusy by remember { mutableStateOf(false) }
-    var selectedDocOutput by remember { mutableStateOf("PDF") }
+    var selectedDocOutput by remember { mutableStateOf<String?>(null) }
     var showClearConfirm by remember { mutableStateOf(false) }
     var showRecent by remember { mutableStateOf(false) }
     var recentFiles by remember { mutableStateOf<List<RecentFile>>(emptyList()) }
@@ -279,6 +279,8 @@ private fun FileConverterScreen(
                 "SVG" to Color(0xFFEF6C00),
                 "XLSX" to Color(0xFF217346),
                 "PPTX" to Color(0xFFD04423),
+                "CSV" to Color(0xFF00897B),
+                "PPT" to Color(0xFFB71C1C),
                 "PDF" to pieChartColors.blue,
             )
             deviceFileCounts.filter { it.value.first > 0 }.map { (label, pair) ->
@@ -335,6 +337,10 @@ private fun FileConverterScreen(
             OutputFormat.AVIF -> mimeType == "image/avif"
             OutputFormat.SVG -> mimeType == "image/svg+xml"
             OutputFormat.PDF -> mimeType == "application/pdf"
+            OutputFormat.CSV -> mimeType == "text/csv"
+            OutputFormat.PPT -> mimeType == "application/vnd.ms-powerpoint"
+            OutputFormat.XLSX -> mimeType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            OutputFormat.PPTX -> mimeType == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         }
     }
 
@@ -844,10 +850,14 @@ private fun FileConverterScreen(
                 onPickFileForFavourite = {
                     val format = selectedFavouriteFormat
                     if (format != null) {
-                        if (format == OutputFormat.PDF) {
-                            pickFavouriteDoc.launch(arrayOf("application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
-                        } else {
-                            pickFavouriteImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        when (format) {
+                            OutputFormat.PDF, OutputFormat.CSV, OutputFormat.PPT,
+                            OutputFormat.XLSX, OutputFormat.PPTX -> {
+                                pickFavouriteDoc.launch(arrayOf("*/*"))
+                            }
+                            else -> {
+                                pickFavouriteImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            }
                         }
                     }
                 },
@@ -861,7 +871,55 @@ private fun FileConverterScreen(
                         for (uri in uris) {
                             runCatching {
                                 withContext(Dispatchers.IO) {
-                                    ImageConverter.convert(context, uri, format, quality = quality.toInt(), scalePercent = scalePercent)
+                                    when (format) {
+                                        // Document formats — use document converters
+                                        OutputFormat.PDF -> {
+                                            val name = ImageConverter.queryDisplayName(context, uri)
+                                            val ext = name.substringAfterLast('.', "").lowercase()
+                                            val ts = System.currentTimeMillis()
+                                            val outName = "converted_$ts.pdf"
+                                            val outUri = when {
+                                                ext == "csv" -> TxtToPdf.convert(context, uri, outName)
+                                                ext == "ppt" || ext == "pptx" -> TxtToPdf.convert(context, uri, outName)
+                                                ext == "xlsx" -> TxtToPdf.convert(context, uri, outName)
+                                                ext == "txt" -> TxtToPdf.convert(context, uri, outName)
+                                                ext == "md" || ext == "markdown" -> MdToPdf.convert(context, uri, outName)
+                                                ext == "html" || ext == "htm" -> HtmlToPdf.convert(context, uri, outName)
+                                                ext == "rtf" -> RtfToPdf.convert(context, uri, outName)
+                                                ext == "odt" -> OdtToPdf.convert(context, uri, outName)
+                                                ext == "doc" || ext == "docx" -> DocxToPdf.convert(context, uri, outName)
+                                                else -> ImageConverter.convert(context, uri, OutputFormat.PDF, quality = quality.toInt(), scalePercent = scalePercent).uri
+                                            }
+                                            ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                        }
+                                        OutputFormat.CSV -> {
+                                            val name = "converted_${System.currentTimeMillis()}.xlsx"
+                                            val outUri = CsvToXlsx.convert(context, uri, name)
+                                            ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                        }
+                                        OutputFormat.XLSX -> {
+                                            val name = "converted_${System.currentTimeMillis()}.xlsx"
+                                            val outUri = CsvToXlsx.convert(context, uri, name)
+                                            ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                        }
+                                        OutputFormat.PPT -> {
+                                            val name = "converted_${System.currentTimeMillis()}.pdf"
+                                            val outUri = TxtToPdf.convert(context, uri, name)
+                                            ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                        }
+                                        OutputFormat.PPTX -> {
+                                            val name = "converted_${System.currentTimeMillis()}.pptx"
+                                            val outUri = try {
+                                                PptToPptx.convert(context, uri, name)
+                                            } catch (_: Throwable) {
+                                                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("Cannot read")
+                                                ImageConverter.saveBytesToMediaStore(context, bytes, name, "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+                                            }
+                                            ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                        }
+                                        // Image formats — use ImageConverter
+                                        else -> ImageConverter.convert(context, uri, format, quality = quality.toInt(), scalePercent = scalePercent)
+                                    }
                                 }
                             }.onSuccess {
                                 converted.add(it)
