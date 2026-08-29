@@ -563,6 +563,7 @@ private fun DocConvertOverlay(
                 // Supported input formats (depends on selected output)
                 val docSupportedInput = when (selectedDocOutput) {
                     "PDF" -> "DOC/DOCX • TXT • RTF • MD • HTML • ODT • CSV • PPT • Images"
+                    "DOCX" -> "DOC • ODT • RTF • TXT • MD • HTML"
                     "XLSX" -> "CSV"
                     "PPTX" -> "PPT"
                     else -> "DOC/DOCX • TXT • RTF • MD • HTML • ODT • CSV • PPT • Images"
@@ -590,11 +591,13 @@ private fun DocConvertOverlay(
                 
                 val docFormats = listOf(
                     Pair("PDF", colors.blue),
+                    Pair("DOCX", Color(0xFF2B579A)),
                     Pair("XLSX", Color(0xFF217346)),
                     Pair("PPTX", Color(0xFFD04423)),
                 )
                 val docFormatMap = mapOf(
                     "PDF" to OutputFormat.PDF,
+                    "DOCX" to OutputFormat.DOCX,
                     "XLSX" to OutputFormat.XLSX,
                     "PPTX" to OutputFormat.PPTX,
                 )
@@ -648,7 +651,7 @@ private fun DocConvertOverlay(
 
                 // Format note
                 Text(
-                    text = "Text docs → PDF • CSV → XLSX • PPT → PPTX",
+                    text = "Text docs → PDF • DOC/ODT/RTF/TXT → DOCX • CSV → XLSX • PPT → PPTX",
                     color = colors.onSurface.copy(alpha = 0.5f),
                     fontSize = 10.sp,
                 )

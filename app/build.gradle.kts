@@ -16,6 +16,7 @@ android {
         targetSdk = 36
         versionCode = 26
         versionName = "3.4.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -54,4 +55,8 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.caverock.androidsvg)
     debugImplementation(libs.androidx.ui.tooling)
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.ext)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.espresso)
 }

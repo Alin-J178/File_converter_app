@@ -7,6 +7,9 @@ activityCompose = "1.11.0"
 composeBom = "2025.06.01"
 iconsExtended = "1.7.8"
 androidsvg = "1.4"
+junit = "4.13.2"
+androidxTestExt = "1.2.1"
+androidxTestRunner = "1.6.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -20,6 +23,10 @@ androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-toolin
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "iconsExtended" }
 caverock-androidsvg = { group = "com.caverock", name = "androidsvg", version.ref = "androidsvg" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-test-ext = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExt" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
+androidx-test-espresso = { group = "androidx.test.espresso", name = "espresso-core", version = "3.6.1" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

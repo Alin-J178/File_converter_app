@@ -304,6 +304,7 @@ internal fun MainScreen(
                     OutputFormat.PPT -> "PPT files"
                     OutputFormat.XLSX -> "CSV files"
                     OutputFormat.PPTX -> "PPT files"
+                    OutputFormat.DOCX -> "DOC \u2022 ODT \u2022 RTF \u2022 TXT \u2022 MD \u2022 HTML"
                     OutputFormat.JPEG -> "PNG \u2022 WebP \u2022 GIF \u2022 BMP \u2022 TIFF \u2022 HEIF \u2022 AVIF \u2022 SVG"
                     OutputFormat.PNG -> "JPEG \u2022 WebP \u2022 GIF \u2022 BMP \u2022 TIFF \u2022 HEIF \u2022 AVIF \u2022 SVG"
                     OutputFormat.WEBP -> "JPEG \u2022 PNG \u2022 GIF \u2022 BMP \u2022 TIFF \u2022 HEIF \u2022 AVIF \u2022 SVG"
@@ -356,6 +357,7 @@ internal fun MainScreen(
                         OutputFormat.PPT -> Color(0xFFB71C1C)
                         OutputFormat.XLSX -> Color(0xFF217346)
                         OutputFormat.PPTX -> Color(0xFFD04423)
+                        OutputFormat.DOCX -> Color(0xFF2B579A)
                         OutputFormat.PDF -> C.blue
                     }
                     val bgColor = if (isSelected) accent else C.surface

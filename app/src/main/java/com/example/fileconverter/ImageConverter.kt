@@ -47,6 +47,7 @@ enum class OutputFormat(
     PPT("PPT", "ppt", "application/vnd.ms-powerpoint", lossy = false),
     XLSX("XLSX", "xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", lossy = false),
     PPTX("PPTX", "pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", lossy = false),
+    DOCX("DOCX", "docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", lossy = false),
 }
 
 /** A file previously saved by this app. */
@@ -114,6 +115,18 @@ object ImageConverter {
                     renderDocThumbnail(context, uri, name, "CSV", maxDim)
                 name.endsWith(".ppt", ignoreCase = true) ->
                     renderDocThumbnail(context, uri, name, "PPT", maxDim)
+                name.endsWith(".docx", ignoreCase = true) ->
+                    renderDocThumbnail(context, uri, name, "DOCX", maxDim)
+                name.endsWith(".odt", ignoreCase = true) ->
+                    renderDocThumbnail(context, uri, name, "ODT", maxDim)
+                name.endsWith(".rtf", ignoreCase = true) ->
+                    renderDocThumbnail(context, uri, name, "RTF", maxDim)
+                name.endsWith(".txt", ignoreCase = true) ->
+                    renderDocThumbnail(context, uri, name, "TXT", maxDim)
+                name.endsWith(".md", ignoreCase = true) ->
+                    renderDocThumbnail(context, uri, name, "MD", maxDim)
+                name.endsWith(".html", ignoreCase = true) || name.endsWith(".htm", ignoreCase = true) ->
+                    renderDocThumbnail(context, uri, name, "HTML", maxDim)
                 else ->
                     decodeSampledBitmap(context, uri, maxDim = maxDim)
             }
@@ -439,6 +452,12 @@ object ImageConverter {
                 "PPTX" -> 0xFFD04423.toInt()
                 "CSV" -> 0xFF00897B.toInt()
                 "PPT" -> 0xFFB71C1C.toInt()
+                "DOCX" -> 0xFF2B579A.toInt()
+                "ODT" -> 0xFF0066CC.toInt()
+                "RTF" -> 0xFF8B4513.toInt()
+                "TXT" -> 0xFF616161.toInt()
+                "MD" -> 0xFF455A64.toInt()
+                "HTML" -> 0xFFE65100.toInt()
                 else -> 0xFF4472C4.toInt()
             }
 
@@ -447,6 +466,12 @@ object ImageConverter {
                 "PPTX" -> extractPptxPreviewText(bytes)
                 "CSV" -> extractCsvPreviewText(bytes)
                 "PPT" -> extractPptPreviewText(bytes)
+                "DOCX" -> extractDocxPreviewText(bytes)
+                "ODT" -> extractPlainTextPreview(bytes)
+                "RTF" -> extractRtfPreviewText(bytes)
+                "TXT" -> extractPlainTextPreview(bytes)
+                "MD" -> extractPlainTextPreview(bytes)
+                "HTML" -> extractPlainTextPreview(bytes)
                 else -> name
             }
 
@@ -589,6 +614,66 @@ object ImageConverter {
         } catch (_: Exception) { "PPT presentation" }
     }
 
+    private fun extractDocxPreviewText(data: ByteArray): String {
+        // DOCX is a ZIP containing word/document.xml — extract text from XML tags
+        return try {
+            val entries = mutableMapOf<String, ByteArray>()
+            java.util.zip.ZipInputStream(data.inputStream()).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    entries[entry.name] = zip.readBytes()
+                    entry = zip.nextEntry
+                }
+            }
+            val docXml = entries["word/document.xml"] ?: return "DOCX document"
+            val xml = String(docXml, Charsets.UTF_8)
+            // Extract text between <w:t> tags
+            val regex = Regex("<w:t[^>]*>(.*?)</w:t>")
+            val sb = StringBuilder()
+            for (match in regex.findAll(xml)) {
+                val t = match.groupValues[1]
+                    .replace("&amp;", "&")
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&quot;", "\"")
+                sb.append(t)
+                if (sb.length > 200) break
+            }
+            sb.toString().ifEmpty { "DOCX document" }
+        } catch (_: Exception) { "DOCX document" }
+    }
+
+    private fun extractPlainTextPreview(data: ByteArray): String {
+        return try {
+            val text = String(data, Charsets.UTF_8)
+            text.lines().take(8).joinToString("\n") { it.take(40) }.ifEmpty { "Text file" }
+        } catch (_: Exception) { "Text file" }
+    }
+
+    private fun extractRtfPreviewText(data: ByteArray): String {
+        return try {
+            val raw = String(data, Charsets.UTF_8)
+            // Strip RTF control words to get readable text
+            val sb = StringBuilder()
+            var i = 0
+            while (i < raw.length && sb.length < 200) {
+                when {
+                    raw[i] == '\\' && i + 1 < raw.length -> {
+                        val next = raw[i + 1]
+                        when (next) {
+                            '{', '}', '\\' -> { sb.append(next); i += 2 }
+                            in 'a'..'z', in 'A'..'Z' -> { i += 2; while (i < raw.length && raw[i].isLetter()) i++ }
+                            else -> i += 1
+                        }
+                    }
+                    raw[i] == '{' || raw[i] == '}' -> i++
+                    else -> { sb.append(raw[i]); i++ }
+                }
+            }
+            sb.toString().ifEmpty { "RTF document" }
+        } catch (_: Exception) { "RTF document" }
+    }
+
     /**
      * Compresses [bitmap] to [format] at the given [quality] (0-100; ignored for
      * lossless formats) and saves it to Pictures/FileConverter. On API 29+ it goes
@@ -638,6 +723,7 @@ object ImageConverter {
             OutputFormat.PPT -> error("PPT files are converted via PptToPptx or TxtToPdf")
             OutputFormat.XLSX -> error("XLSX files are created via CsvToXlsx")
             OutputFormat.PPTX -> error("PPTX files are created via PptToPptx")
+            OutputFormat.DOCX -> error("DOCX files are created via DocToDocx")
         }
         val effectiveQuality = if (format.lossy) quality else 100
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

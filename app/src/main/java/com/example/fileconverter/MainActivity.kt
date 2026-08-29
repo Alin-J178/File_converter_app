@@ -294,6 +294,12 @@ private fun FileConverterScreen(
                 "PPTX" to Color(0xFFD04423),
                 "CSV" to Color(0xFF00897B),
                 "PPT" to Color(0xFFB71C1C),
+                "DOCX" to Color(0xFF2B579A),
+                "ODT" to Color(0xFF0066CC),
+                "RTF" to Color(0xFF8B4513),
+                "TXT" to Color(0xFF616161),
+                "MD" to Color(0xFF455A64),
+                "HTML" to Color(0xFFE65100),
                 "PDF" to pieChartColors.blue,
             )
             deviceFileCounts.filter { it.value.first > 0 }.map { (label, pair) ->
@@ -354,6 +360,7 @@ private fun FileConverterScreen(
             OutputFormat.PPT -> mimeType == "application/vnd.ms-powerpoint"
             OutputFormat.XLSX -> mimeType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             OutputFormat.PPTX -> mimeType == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            OutputFormat.DOCX -> mimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         }
     }
 
@@ -709,43 +716,79 @@ private fun FileConverterScreen(
                                             val outUri = ImageConverter.compressPdf(context, uri, quality = quality.toInt(), scalePercent = scalePercent, displayName = outName)
                                             ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
                                         }
-                                        // Word docs → PDF
+                                        // Word docs → DOCX or PDF
                                         mimeType == "application/msword" ||
                                         mimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
                                         ext == "doc" || ext == "docx" -> {
-                                            val outName = "converted_$ts.pdf"
-                                            val outUri = DocxToPdf.convert(context, uri, outName)
-                                            ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            if (selectedDocOutput == "DOCX") {
+                                                val outName = "converted_$ts.docx"
+                                                val outUri = DocToDocx.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            } else {
+                                                val outName = "converted_$ts.pdf"
+                                                val outUri = DocxToPdf.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            }
                                         }
-                                        // TXT → PDF
+                                        // TXT → DOCX or PDF
                                         mimeType == "text/plain" || ext == "txt" -> {
-                                            val outName = "converted_$ts.pdf"
-                                            val outUri = TxtToPdf.convert(context, uri, outName)
-                                            ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            if (selectedDocOutput == "DOCX") {
+                                                val outName = "converted_$ts.docx"
+                                                val outUri = DocToDocx.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            } else {
+                                                val outName = "converted_$ts.pdf"
+                                                val outUri = TxtToPdf.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            }
                                         }
-                                        // Markdown → PDF
+                                        // Markdown → DOCX or PDF
                                         mimeType == "text/markdown" || ext == "md" || ext == "markdown" -> {
-                                            val outName = "converted_$ts.pdf"
-                                            val outUri = MdToPdf.convert(context, uri, outName)
-                                            ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            if (selectedDocOutput == "DOCX") {
+                                                val outName = "converted_$ts.docx"
+                                                val outUri = DocToDocx.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            } else {
+                                                val outName = "converted_$ts.pdf"
+                                                val outUri = MdToPdf.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            }
                                         }
-                                        // HTML → PDF
+                                        // HTML → DOCX or PDF
                                         mimeType == "text/html" || ext == "html" || ext == "htm" -> {
-                                            val outName = "converted_$ts.pdf"
-                                            val outUri = HtmlToPdf.convert(context, uri, outName)
-                                            ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            if (selectedDocOutput == "DOCX") {
+                                                val outName = "converted_$ts.docx"
+                                                val outUri = DocToDocx.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            } else {
+                                                val outName = "converted_$ts.pdf"
+                                                val outUri = HtmlToPdf.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            }
                                         }
-                                        // RTF → PDF
+                                        // RTF → DOCX or PDF
                                         mimeType == "application/rtf" || ext == "rtf" -> {
-                                            val outName = "converted_$ts.pdf"
-                                            val outUri = RtfToPdf.convert(context, uri, outName)
-                                            ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            if (selectedDocOutput == "DOCX") {
+                                                val outName = "converted_$ts.docx"
+                                                val outUri = DocToDocx.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            } else {
+                                                val outName = "converted_$ts.pdf"
+                                                val outUri = RtfToPdf.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            }
                                         }
-                                        // ODT → PDF
+                                        // ODT → DOCX or PDF
                                         mimeType == "application/vnd.oasis.opendocument.text" || ext == "odt" -> {
-                                            val outName = "converted_$ts.pdf"
-                                            val outUri = OdtToPdf.convert(context, uri, outName)
-                                            ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            if (selectedDocOutput == "DOCX") {
+                                                val outName = "converted_$ts.docx"
+                                                val outUri = DocToDocx.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            } else {
+                                                val outName = "converted_$ts.pdf"
+                                                val outUri = OdtToPdf.convert(context, uri, outName)
+                                                ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                            }
                                         }
                                         // CSV → XLSX or PDF
                                         mimeType == "text/csv" || ext == "csv" -> {
@@ -865,7 +908,7 @@ private fun FileConverterScreen(
                     if (format != null) {
                         when (format) {
                             OutputFormat.PDF, OutputFormat.CSV, OutputFormat.PPT,
-                            OutputFormat.XLSX, OutputFormat.PPTX -> {
+                            OutputFormat.XLSX, OutputFormat.PPTX, OutputFormat.DOCX -> {
                                 pickFavouriteDoc.launch(arrayOf("*/*"))
                             }
                             else -> {
@@ -928,6 +971,11 @@ private fun FileConverterScreen(
                                                 val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("Cannot read")
                                                 ImageConverter.saveBytesToMediaStore(context, bytes, name, "application/vnd.openxmlformats-officedocument.presentationml.presentation")
                                             }
+                                            ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
+                                        }
+                                        OutputFormat.DOCX -> {
+                                            val name = "converted_${System.currentTimeMillis()}.docx"
+                                            val outUri = DocToDocx.convert(context, uri, name)
                                             ConversionResult(outUri, ImageConverter.querySize(context, outUri), ImageConverter.displayPath(context, outUri), OutputFormat.PDF)
                                         }
                                         // Image formats — use ImageConverter

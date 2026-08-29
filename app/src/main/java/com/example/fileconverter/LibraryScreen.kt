@@ -297,6 +297,12 @@ private fun FileTile(
         "PPTX" -> Color(0xFFD04423)
         "CSV" -> Color(0xFF00897B)
         "PPT" -> Color(0xFFB71C1C)
+        "DOCX" -> Color(0xFF2B579A)
+        "ODT" -> Color(0xFF0066CC)
+        "RTF" -> Color(0xFF8B4513)
+        "TXT" -> Color(0xFF616161)
+        "MD" -> Color(0xFF455A64)
+        "HTML" -> Color(0xFFE65100)
         else -> colors.muted
     }
 
