@@ -8,8 +8,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,7 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -55,18 +53,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.ByteArrayInputStream
 import java.io.InputStreamReader
 import java.util.zip.ZipInputStream
+import kotlin.math.abs
 
 /**
- * Full-screen document preview with page-by-page scrolling.
- * Supports: PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, CSV, ODT, RTF, TXT, MD, HTML.
- * All parsing is done manually — no Apache POI required.
+ * Full-screen document preview with page-by-page scrolling and pinch-to-zoom.
+ * Zoom is applied at the content level: when zoomed out (1×), normal scrolling
+ * works. When zoomed in, gestures control pan. Double-tap resets to 1×.
  */
 @Composable
 fun DocumentPreviewScreen(
@@ -88,6 +86,12 @@ fun DocumentPreviewScreen(
     var currentPage by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
+
+    // Zoom state
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+    val isZoomed = scale > 1.05f
 
     LaunchedEffect(uri, ext) {
         isLoading = true
@@ -160,7 +164,7 @@ fun DocumentPreviewScreen(
             .safeDrawingPadding(),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top bar
+            // Top bar — always visible, not affected by zoom
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -185,7 +189,8 @@ fun DocumentPreviewScreen(
                     )
                     if (totalPages > 0) {
                         Text(
-                            text = "Page ${currentPage + 1} of $totalPages",
+                            text = "Page ${currentPage + 1} of $totalPages" +
+                                    if (isZoomed) " • ${String.format("%.1f", scale)}×" else "",
                             color = colors.muted,
                             fontSize = 12.sp,
                         )
@@ -208,169 +213,160 @@ fun DocumentPreviewScreen(
                     .background(accentColor),
             )
 
-            // Content
-            when {
-                isLoading -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(48.dp),
-                                color = accentColor,
-                                strokeWidth = 4.dp,
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text("Loading preview…", color = colors.muted, fontSize = 14.sp)
-                        }
-                    }
-                }
-                loadError != null -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(loadError!!, color = colors.pink, fontSize = 14.sp)
-                    }
-                }
-                bitmapPages.isNotEmpty() -> {
-                    val listState = rememberLazyListState()
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        itemsIndexed(bitmapPages) { index, pageBmp ->
-                            ZoomablePage {
-                                Image(
-                                    bitmap = pageBmp.asImageBitmap(),
-                                    contentDescription = "Page ${index + 1}",
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color.White),
-                                )
-                            }
-                        }
-                    }
-                    LaunchedEffect(listState.firstVisibleItemIndex) {
-                        currentPage = listState.firstVisibleItemIndex
-                    }
-                }
-                textPages.isNotEmpty() -> {
-                    val listState = rememberLazyListState()
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    ) {
-                        itemsIndexed(textPages) { index, pageText ->
-                            ZoomablePage {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(colors.surface, RoundedCornerShape(12.dp))
-                                        .padding(16.dp),
-                                ) {
-                                    if (totalPages > 1) {
-                                        Text(
-                                            text = "— Page ${index + 1} —",
-                                            color = accentColor,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(bottom = 8.dp),
-                                        )
-                                    }
-                                    val isMonospace = ext in listOf("csv", "txt", "md", "html", "htm", "rtf", "xls", "xlsx")
-                                    val text = pageText.trimEnd()
-                                    if (text.isNotEmpty()) {
-                                        Text(
-                                            text = text,
-                                            color = colors.onBackground,
-                                            fontSize = 13.sp,
-                                            lineHeight = 20.sp,
-                                            fontFamily = if (isMonospace) monospace else FontFamily.Default,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .then(
-                                                    if (isMonospace) Modifier.horizontalScroll(rememberScrollState())
-                                                    else Modifier
-                                                ),
-                                        )
-                                    }
+            // Zoomable content area — clipped so zoom doesn't overlap top bar
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clipToBounds(),
+            ) {
+                // Content (scrolls normally at 1×, pans when zoomed)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            translationX = offsetX,
+                            translationY = offsetY,
+                        )
+                        // Pinch-to-zoom + pan
+                        .pointerInput(isZoomed) {
+                            detectTransformGestures { centroid, pan, zoom, _ ->
+                                val newScale = (scale * zoom).coerceIn(1f, 5f)
+                                val scaleChange = newScale / scale
+
+                                // Offset toward the centroid for natural zoom
+                                offsetX = (offsetX + pan.x) * scaleChange +
+                                        centroid.x * (1f - scaleChange)
+                                offsetY = (offsetY + pan.y) * scaleChange +
+                                        centroid.y * (1f - scaleChange)
+
+                                scale = newScale
+
+                                // Clamp when returning to 1×
+                                if (scale <= 1.05f) {
+                                    scale = 1f
+                                    offsetX = 0f
+                                    offsetY = 0f
                                 }
                             }
-                            Spacer(modifier = Modifier.height(8.dp))
                         }
-                    }
-                    LaunchedEffect(listState.firstVisibleItemIndex) {
-                        currentPage = listState.firstVisibleItemIndex
+                        // Double-tap to toggle zoom (1× ↔ 2.5×)
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onDoubleTap = { offset ->
+                                    if (scale > 1.05f) {
+                                        // Currently zoomed → reset to 1×
+                                        scale = 1f
+                                        offsetX = 0f
+                                        offsetY = 0f
+                                    } else {
+                                        // At 1× → zoom to 2.5× centered on tap
+                                        scale = 2.5f
+                                        // Center the view on the tapped point
+                                        offsetX = (size.width / 2f - offset.x) * 1.5f
+                                        offsetY = (size.height / 2f - offset.y) * 1.5f
+                                    }
+                                },
+                            )
+                        }
+                ) {
+                    when {
+                        isLoading -> {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(48.dp),
+                                        color = accentColor,
+                                        strokeWidth = 4.dp,
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text("Loading preview…", color = colors.muted, fontSize = 14.sp)
+                                }
+                            }
+                        }
+                        loadError != null -> {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(loadError!!, color = colors.pink, fontSize = 14.sp)
+                            }
+                        }
+                        bitmapPages.isNotEmpty() -> {
+                            val listState = rememberLazyListState()
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                userScrollEnabled = !isZoomed,
+                            ) {
+                                itemsIndexed(bitmapPages) { index, pageBmp ->
+                                    Image(
+                                        bitmap = pageBmp.asImageBitmap(),
+                                        contentDescription = "Page ${index + 1}",
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.White),
+                                    )
+                                }
+                            }
+                            LaunchedEffect(listState.firstVisibleItemIndex) {
+                                currentPage = listState.firstVisibleItemIndex
+                            }
+                        }
+                        textPages.isNotEmpty() -> {
+                            val listState = rememberLazyListState()
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                                userScrollEnabled = !isZoomed,
+                            ) {
+                                itemsIndexed(textPages) { index, pageText ->
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(colors.surface, RoundedCornerShape(12.dp))
+                                            .padding(16.dp),
+                                    ) {
+                                        if (totalPages > 1) {
+                                            Text(
+                                                text = "— Page ${index + 1} —",
+                                                color = accentColor,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(bottom = 8.dp),
+                                            )
+                                        }
+                                        val isMonospace = ext in listOf("csv", "txt", "md", "html", "htm", "rtf", "xls", "xlsx")
+                                        val text = pageText.trimEnd()
+                                        if (text.isNotEmpty()) {
+                                            Text(
+                                                text = text,
+                                                color = colors.onBackground,
+                                                fontSize = 13.sp,
+                                                lineHeight = 20.sp,
+                                                fontFamily = if (isMonospace) monospace else FontFamily.Default,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .then(
+                                                        if (isMonospace) Modifier.horizontalScroll(rememberScrollState())
+                                                        else Modifier
+                                                    ),
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                }
+                            }
+                            LaunchedEffect(listState.firstVisibleItemIndex) {
+                                currentPage = listState.firstVisibleItemIndex
+                            }
+                        }
                     }
                 }
             }
         }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  ZoomablePage — pinch-to-zoom + pan + double-tap to reset
-// ═══════════════════════════════════════════════════════════════
-
-/**
- * Wraps [content] with pinch-to-zoom, pan, and double-tap-to-reset.
- * Each page gets its own independent zoom state so scrolling the
- * LazyColumn resets zoom for the previous page.
- */
-@Composable
-private fun ZoomablePage(
-    maxZoom: Float = 4f,
-    content: @Composable () -> Unit,
-) {
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    var offsetY by remember { mutableFloatStateOf(0f) }
-
-    // Double-tap resets zoom
-    val doubleTapReset = Modifier.pointerInput(Unit) {
-        detectTapGestures(
-            onDoubleTap = {
-                // Animate back to 1× (we just snap for simplicity)
-                scale = 1f
-                offsetX = 0f
-                offsetY = 0f
-            },
-        )
-    }
-
-    // Pinch-to-zoom + pan
-    val transformModifier = Modifier.pointerInput(Unit) {
-        detectTransformGestures { centroid, pan, zoom, _ ->
-            val newScale = (scale * zoom).coerceIn(1f, maxZoom)
-            val ratio = newScale / scale
-
-            // Zoom toward the centroid
-            offsetX = (offsetX + pan.x) * ratio + centroid.x * (1 - ratio)
-            offsetY = (offsetY + pan.y) * ratio + centroid.y * (1 - ratio)
-
-            // Clamp pan when zoomed out
-            if (newScale <= 1f) {
-                offsetX = 0f
-                offsetY = 0f
-            }
-
-            scale = newScale
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer(
-                scaleX = scale,
-                scaleY = scale,
-                translationX = offsetX,
-                translationY = offsetY,
-            )
-            .then(doubleTapReset)
-            .then(transformModifier),
-    ) {
-        content()
     }
 }
 
@@ -418,7 +414,6 @@ private fun parseDocx(context: android.content.Context, uri: Uri): List<String> 
 
     if (documentXml.isEmpty()) return listOf("Empty document")
 
-    // Split by paragraph tags and extract text from each
     val tagRegex = Regex("""<[^>]+>""")
     val sections = documentXml.split(Regex("""<w:p[\s>]"""))
     val paragraphs = sections.mapNotNull { section ->
@@ -434,9 +429,6 @@ private fun parseDocx(context: android.content.Context, uri: Uri): List<String> 
 private fun parseDocRaw(context: android.content.Context, uri: Uri): List<String> {
     val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
     val bytes = input.use { it.readBytes() }
-
-    // Try to find the WordDocument stream and extract Unicode text
-    // Simple heuristic: scan for runs of printable chars / UTF-16LE text
     val text = extractReadableText(bytes)
     return if (text.isBlank()) listOf("Could not extract text from DOC file")
     else text.chunked(2000).map { it }
@@ -453,8 +445,7 @@ private fun parseXlsx(context: android.content.Context, uri: Uri): List<String> 
     while (entry != null) {
         if (entry.name == "xl/sharedStrings.xml" ||
             entry.name.startsWith("xl/worksheets/sheet") ||
-            entry.name == "xl/workbook.xml" ||
-            entry.name == "xl/styles.xml"
+            entry.name == "xl/workbook.xml"
         ) {
             zipEntries[entry.name] = zipIn.bufferedReader().readText()
         }
@@ -462,10 +453,8 @@ private fun parseXlsx(context: android.content.Context, uri: Uri): List<String> 
     }
     zipIn.close()
 
-    // Parse shared strings
     val sharedStrings = parseSharedStrings(zipEntries["xl/sharedStrings.xml"] ?: "")
 
-    // Parse each worksheet
     val pages = mutableListOf<String>()
     val sheetEntries = zipEntries.keys.filter { it.startsWith("xl/worksheets/sheet") }.sorted()
     for (sheetName in sheetEntries) {
@@ -475,21 +464,18 @@ private fun parseXlsx(context: android.content.Context, uri: Uri): List<String> 
         sb.appendLine("═══ Sheet $sheetNum ═══")
         sb.appendLine()
 
-        // Extract rows
         val rowRegex = Regex("""<row[^>]*>(.*?)</row>""", RegexOption.DOT_MATCHES_ALL)
         val cellRegex = Regex("""<c[^>]*r="([^"]*)"[^>]*>(?:<v>([^<]*)</v>)?</c>""", RegexOption.DOT_MATCHES_ALL)
 
         for (rowMatch in rowRegex.findAll(sheetXml)) {
             val cells = mutableListOf<String>()
             for (cellMatch in cellRegex.findAll(rowMatch.groupValues[1])) {
-                val ref = cellMatch.groupValues[1]
                 val value = cellMatch.groupValues[2]
                 val cellType = if (cellMatch.value.contains("""t="s"""")) "s" else "n"
                 val display = if (cellType == "s" && value.isNotEmpty()) {
                     val idx = value.toIntOrNull() ?: -1
                     if (idx in sharedStrings.indices) sharedStrings[idx] else value
                 } else if (value.isNotEmpty()) {
-                    // Format number
                     val d = value.toDoubleOrNull()
                     if (d != null && d == d.toLong().toDouble()) d.toLong().toString() else value
                 } else {
@@ -507,7 +493,6 @@ private fun parseXlsx(context: android.content.Context, uri: Uri): List<String> 
     return if (pages.isEmpty()) listOf("Empty spreadsheet") else pages
 }
 
-/** Parse sharedStrings.xml for XLSX */
 private fun parseSharedStrings(xml: String): List<String> {
     if (xml.isEmpty()) return emptyList()
     val result = mutableListOf<String>()
@@ -543,20 +528,15 @@ private fun parsePptx(context: android.content.Context, uri: Uri): List<String> 
         val sb = StringBuilder()
         sb.appendLine("═══ Slide ${idx + 1} ═══")
         sb.appendLine()
-
-        // Extract text between <a:t> tags (DrawingML text runs)
         val textRegex = Regex("""<a:t>([^<]+)</a:t>""")
         val texts = textRegex.findAll(slideXml).map { it.groupValues[1].trim() }.filter { it.isNotEmpty() }.toList()
         if (texts.isNotEmpty()) {
-            for (t in texts) {
-                sb.appendLine(t)
-            }
+            for (t in texts) sb.appendLine(t)
         } else {
             sb.appendLine("[No text content]")
         }
         pages.add(sb.toString())
     }
-
     return pages
 }
 
@@ -564,7 +544,6 @@ private fun parsePptx(context: android.content.Context, uri: Uri): List<String> 
 private fun parsePptRaw(context: android.content.Context, uri: Uri): List<String> {
     val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
     val bytes = input.use { it.readBytes() }
-
     val text = extractReadableText(bytes)
     return if (text.isBlank()) listOf("Could not extract text from PPT file")
     else text.chunked(2000).map { it }
@@ -592,7 +571,6 @@ private fun parseCsvPreview(context: android.content.Context, uri: Uri): List<St
     return pages
 }
 
-/** Parse a CSV line handling quoted fields */
 private fun parseCsvLine(line: String, delimiter: Char): List<String> {
     val result = mutableListOf<String>()
     val current = StringBuilder()
@@ -630,7 +608,6 @@ private fun parseOdt(context: android.content.Context, uri: Uri): List<String> {
 
     if (contentXml.isEmpty()) return listOf("Empty document")
 
-    // Extract text between <text:p> tags
     val paraRegex = Regex("""<text:p[^>]*>(.*?)</text:p>""", RegexOption.DOT_MATCHES_ALL)
     val tagRegex = Regex("""<[^>]+>""")
     val paragraphs = paraRegex.findAll(contentXml).map { match ->
@@ -645,8 +622,6 @@ private fun parseOdt(context: android.content.Context, uri: Uri): List<String> {
 private fun parseRtfPreview(context: android.content.Context, uri: Uri): List<String> {
     val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
     val text = input.use { it.bufferedReader().readText() }
-
-    // Remove RTF header and control sequences
     val cleaned = text
         .replace(Regex("""\{\\rtf1[^}]*\}"""), "")
         .replace(Regex("""\\'[0-9a-fA-F]{2}"""), "")
@@ -657,7 +632,6 @@ private fun parseRtfPreview(context: android.content.Context, uri: Uri): List<St
         .replace("\r\n", "\n")
         .replace("\r", "\n")
         .trim()
-
     if (cleaned.isEmpty()) return listOf("Empty RTF document")
     return cleaned.chunked(2000).map { it }
 }
@@ -667,7 +641,6 @@ private fun parseTxtPreview(context: android.content.Context, uri: Uri): List<St
     val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
     val text = input.use { it.bufferedReader().readText() }
     if (text.isBlank()) return listOf("Empty file")
-
     val linesPerPage = 50
     return text.lines().chunked(linesPerPage).map { chunk -> chunk.joinToString("\n") }
 }
@@ -676,7 +649,6 @@ private fun parseTxtPreview(context: android.content.Context, uri: Uri): List<St
 private fun parseHtmlPreview(context: android.content.Context, uri: Uri): List<String> {
     val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
     val html = input.use { it.bufferedReader().readText() }
-
     val plain = html
         .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
         .replace(Regex("""</p>""", RegexOption.IGNORE_CASE), "\n\n")
@@ -690,28 +662,22 @@ private fun parseHtmlPreview(context: android.content.Context, uri: Uri): List<S
         .replace("&nbsp;", " ")
         .replace(Regex("""\n{3,}"""), "\n\n")
         .trim()
-
     if (plain.isEmpty()) return listOf("Empty HTML file")
-
     val linesPerPage = 50
     return plain.lines().chunked(linesPerPage).map { chunk -> chunk.joinToString("\n") }
 }
 
-/**
- * Generic extractor for binary files (DOC, PPT): scans the byte array for
- * runs of printable characters and UTF-16LE text to extract readable content.
- */
+/** Generic extractor for binary files: scans for printable text runs */
 private fun extractReadableText(bytes: ByteArray): String {
     val result = StringBuilder()
 
-    // Method 1: Look for UTF-16LE text runs (common in Office binary formats)
+    // UTF-16LE scan
     val utf16Runs = mutableListOf<String>()
     var currentRun = StringBuilder()
     var i = 0
     while (i < bytes.size - 1) {
         val lo = bytes[i].toInt() and 0xFF
         val hi = bytes[i + 1].toInt() and 0xFF
-        // Printable ASCII as UTF-16LE: lo is printable, hi is 0
         if (lo in 0x20..0x7E && hi == 0) {
             currentRun.append(lo.toChar())
         } else if (currentRun.length >= 4) {
@@ -724,13 +690,10 @@ private fun extractReadableText(bytes: ByteArray): String {
     }
     if (currentRun.length >= 4) utf16Runs.add(currentRun.toString())
 
-    // Deduplicate and sort by length (longest first)
     val uniqueRuns = utf16Runs.distinct().sortedByDescending { it.length }
-
-    // Filter out garbage — keep runs that look like real text
     val realText = uniqueRuns.filter { run ->
         val alphaCount = run.count { it.isLetter() }
-        alphaCount > run.length * 0.5 // at least 50% letters
+        alphaCount > run.length * 0.5
     }
 
     for (run in realText) {
@@ -738,7 +701,7 @@ private fun extractReadableText(bytes: ByteArray): String {
         result.appendLine()
     }
 
-    // Method 2: If we didn't get much, try ASCII scan
+    // ASCII fallback
     if (result.length < 50) {
         result.clear()
         currentRun = StringBuilder()
