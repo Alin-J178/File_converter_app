@@ -140,6 +140,8 @@ private fun FileConverterScreen(
     var infoPath by remember { mutableStateOf<String?>(null) }
     var infoEditing by remember { mutableStateOf(false) }
     var infoRenameText by remember { mutableStateOf("") }
+    // Document preview state
+    var docPreviewFile by remember { mutableStateOf<RecentFile?>(null) }
     LaunchedEffect(infoFile) { infoEditing = false }
 
     // Favourite conversion state
@@ -1056,7 +1058,7 @@ private fun FileConverterScreen(
 
 
 
-        if (showRecent) {
+        if (showRecent && docPreviewFile == null) {
             val displayFiles = if (formatFilter != null) filteredDeviceFiles else recentFiles
             LibraryScreen(
                 recentFiles = displayFiles,
@@ -1127,6 +1129,9 @@ private fun FileConverterScreen(
                     infoDims = dims
                     infoPath = path
                 },
+                onDocumentClick = { file ->
+                    docPreviewFile = file
+                },
                 onClearAll = {
                     scope.launch {
                         recentFiles.forEach { ImageConverter.deleteFile(context, it.uri) }
@@ -1144,6 +1149,15 @@ private fun FileConverterScreen(
                         libraryThumbs[uriStr] = bmp
                     }
                 },
+            )
+        }
+
+        // Document preview — full-screen viewer for document files
+        if (docPreviewFile != null) {
+            DocumentPreviewScreen(
+                uri = docPreviewFile!!.uri,
+                fileName = docPreviewFile!!.name,
+                onBack = { docPreviewFile = null },
             )
         }
 

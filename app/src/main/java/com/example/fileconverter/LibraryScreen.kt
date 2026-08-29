@@ -69,6 +69,7 @@ internal fun LibraryScreen(
     onToggleSelectMode: () -> Unit,
     onDeleteSelected: () -> Unit,
     onLongPress: (RecentFile, Pair<Int, Int>?, String?) -> Unit,
+    onDocumentClick: ((RecentFile) -> Unit)? = null,
     onClearAll: () -> Unit,
     showClearConfirm: Boolean = false,
     onShowClearConfirm: (Boolean) -> Unit = {},
@@ -185,12 +186,18 @@ internal fun LibraryScreen(
                             onToggleSelect = onToggleSelect,
                             onClick = {
                                 if (!selectMode) {
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(file.uri, context.contentResolver.getType(file.uri) ?: "*/*")
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    try { context.startActivity(intent) } catch (_: Exception) {
-                                        Toast.makeText(context, "Cannot open file", Toast.LENGTH_SHORT).show()
+                                    val fileExt = file.name.substringAfterLast('.', "").lowercase()
+                                    val docExts = setOf("pdf","docx","doc","xlsx","xls","pptx","ppt","csv","odt","rtf","txt","md","html","htm")
+                                    if (fileExt in docExts && onDocumentClick != null) {
+                                        onDocumentClick(file)
+                                    } else {
+                                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                                            setDataAndType(file.uri, context.contentResolver.getType(file.uri) ?: "*/*")
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        try { context.startActivity(intent) } catch (_: Exception) {
+                                            Toast.makeText(context, "Cannot open file", Toast.LENGTH_SHORT).show()
+                                        }
                                     }
                                 }
                             },
