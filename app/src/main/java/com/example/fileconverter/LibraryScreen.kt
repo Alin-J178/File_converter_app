@@ -70,6 +70,7 @@ internal fun LibraryScreen(
     onDeleteSelected: () -> Unit,
     onLongPress: (RecentFile, Pair<Int, Int>?, String?) -> Unit,
     onDocumentClick: ((RecentFile) -> Unit)? = null,
+    onImageClick: ((RecentFile) -> Unit)? = null,
     onClearAll: () -> Unit,
     showClearConfirm: Boolean = false,
     onShowClearConfirm: (Boolean) -> Unit = {},
@@ -188,8 +189,11 @@ internal fun LibraryScreen(
                                 if (!selectMode) {
                                     val fileExt = file.name.substringAfterLast('.', "").lowercase()
                                     val docExts = setOf("pdf","docx","doc","xlsx","xls","pptx","ppt","csv","odt","rtf","txt","md","html","htm")
+                                    val imgExts = setOf("jpeg","jpg","png","webp","gif","bmp","tiff","tif","heif","heic","avif","svg")
                                     if (fileExt in docExts && onDocumentClick != null) {
                                         onDocumentClick(file)
+                                    } else if (fileExt in imgExts && onImageClick != null) {
+                                        onImageClick(file)
                                     } else {
                                         val intent = Intent(Intent.ACTION_VIEW).apply {
                                             setDataAndType(file.uri, context.contentResolver.getType(file.uri) ?: "*/*")
