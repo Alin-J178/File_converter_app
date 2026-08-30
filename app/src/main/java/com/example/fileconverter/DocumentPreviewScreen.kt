@@ -1,6 +1,7 @@
 package com.example.fileconverter
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.util.Log
@@ -12,9 +13,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -48,678 +50,434 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
-import java.io.ByteArrayInputStream
-import java.io.InputStreamReader
-import java.util.zip.ZipInputStream
-import kotlin.math.abs
 
-/**
- * Full-screen document preview with page-by-page scrolling and pinch-to-zoom.
- * Zoom is applied at the content level: when zoomed out (1×), normal scrolling
- * works. When zoomed in, gestures control pan. Double-tap resets to 1×.
- */
-@Composable
-fun DocumentPreviewScreen(
-    uri: Uri,
-    fileName: String,
-    onBack: () -> Unit,
-) {
-    val context = LocalContext.current
-    val colors = LocalAppColors.current
-    val ext = fileName.substringAfterLast('.', "").lowercase()
-    val monospace = FontFamily.Monospace
+/* ===== Simple parsers ===== */
 
-    val mimeType = remember(uri) {
-        context.contentResolver.getType(uri) ?: ""
+object PlainTextParser {
+    fun parse(ctx: android.content.Context, uri: Uri): TextDocument {
+        val i = ctx.contentResolver.openInputStream(uri) ?: return TextDocument(emptyList())
+        val t = i.use { it.bufferedReader().readText() }
+        return if (t.isBlank()) TextDocument(listOf(TextBlock("Empty file")))
+        else TextDocument(t.lines().chunked(50).map { TextBlock(it.joinToString("\n")) })
+    }
+}
+
+object MarkdownParser {
+    fun parse(ctx: android.content.Context, uri: Uri): TextDocument {
+        val i = ctx.contentResolver.openInputStream(uri) ?: return TextDocument(emptyList())
+        val t = i.use { it.bufferedReader().readText() }
+        return if (t.isBlank()) TextDocument(listOf(TextBlock("Empty file")))
+        else TextDocument(t.lines().map { l ->
+            when {
+                l.startsWith("# ") -> TextBlock(l.removePrefix("# "), isHeading = true, headingLevel = 1)
+                l.startsWith("## ") -> TextBlock(l.removePrefix("## "), isHeading = true, headingLevel = 2)
+                l.startsWith("### ") -> TextBlock(l.removePrefix("### "), isHeading = true, headingLevel = 3)
+                else -> TextBlock(l)
+            }
+        })
+    }
+}
+
+object RtfParser {
+    fun parse(ctx: android.content.Context, uri: Uri): TextDocument {
+        val i = ctx.contentResolver.openInputStream(uri) ?: return TextDocument(emptyList())
+        val t = i.use { it.bufferedReader().readText() }
+        val c = t.replace(Regex("""\{\\rtf1[^}]*\}"""), "")
+            .replace(Regex("""\\'[0-9a-fA-F]{2}"""), "")
+            .replace(Regex("""\\u\d+;?"""), "")
+            .replace(Regex("""\\\w+\s?"""), "")
+            .replace(Regex("""\{[^}]*\}"""), "")
+            .replace("\\", "").replace("\r\n", "\n").replace("\r", "\n").trim()
+        return if (c.isEmpty()) TextDocument(listOf(TextBlock("Empty RTF")))
+        else TextDocument(c.chunked(2000).map { TextBlock(it) })
+    }
+}
+
+object HtmlParser {
+    fun parse(ctx: android.content.Context, uri: Uri): WordDocument {
+        val i = ctx.contentResolver.openInputStream(uri) ?: return WordDocument(emptyList())
+        val h = i.use { it.bufferedReader().readText() }
+        val p = h.replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("""</p>""", RegexOption.IGNORE_CASE), "\n\n")
+            .replace(Regex("""</div>""", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("""</h[1-6]>""", RegexOption.IGNORE_CASE), "\n\n")
+            .replace(Regex("""</li>""", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("""<[^>]+>"""), "")
+            .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ")
+            .replace(Regex("""\n{3,}"""), "\n\n").trim()
+        return if (p.isEmpty()) WordDocument(listOf(WordBlock.Paragraph(listOf(WordRun("Empty HTML")))))
+        else WordDocument(p.lines().chunked(50).map { WordBlock.Paragraph(listOf(WordRun(it.joinToString("\n")))) })
+    }
+}
+
+object CsvParser {
+    fun parse(ctx: android.content.Context, uri: Uri): SpreadsheetDocument {
+        val i = ctx.contentResolver.openInputStream(uri) ?: return SpreadsheetDocument(emptyList())
+        val r = java.io.BufferedReader(java.io.InputStreamReader(i))
+        val ls = r.use { it.readLines() }
+        if (ls.isEmpty()) return SpreadsheetDocument(listOf(SpreadsheetSheet("CSV", emptyList())))
+        val d = if (ls.first().contains('\t')) '\t' else ','
+        val ar = ls.map { pcl(it, d) }.filter { it.any { c -> c.isNotEmpty() } }
+        return if (ar.isEmpty()) SpreadsheetDocument(listOf(SpreadsheetSheet("CSV", emptyList())))
+        else SpreadsheetDocument(listOf(SpreadsheetSheet("CSV", ar.mapIndexed { ri, row ->
+            SpreadsheetRow(cells = row.map { SpreadsheetCell(value = it, bold = ri == 0) })
+        })))
     }
 
-    var textPages by remember { mutableStateOf<List<String>>(emptyList()) }
-    var bitmapPages by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
-    var currentPage by remember { mutableIntStateOf(0) }
-    var isLoading by remember { mutableStateOf(true) }
-    var loadError by remember { mutableStateOf<String?>(null) }
+    private fun pcl(line: String, d: Char): List<String> {
+        val r2 = mutableListOf<String>(); val sb = StringBuilder(); var q = false
+        for (c in line) { when { c == '"' -> q = !q; c == d && !q -> { r2.add(sb.toString().trim()); sb.clear() }; else -> sb.append(c) } }
+        r2.add(sb.toString().trim()); return r2
+    }
+}
 
-    // Zoom state
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    var offsetY by remember { mutableFloatStateOf(0f) }
-    val isZoomed = scale > 1.05f
+/* ===== PDF ===== */
+private fun renderPdfPages(ctx: android.content.Context, uri: Uri): List<Bitmap> {
+    val p = mutableListOf<Bitmap>()
+    ctx.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+        PdfRenderer(pfd).use { r ->
+            for (i in 0 until r.pageCount) {
+                val pg = r.openPage(i)
+                val w = (pg.width * 2f).toInt()
+                val h = (pg.height * 2f).toInt()
+                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                bmp.eraseColor(android.graphics.Color.WHITE)
+                pg.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                pg.close()
+                p.add(bmp)
+            }
+        }
+    }
+    return p
+}
+
+@Composable
+private fun renderWordTable(table: WordBlock.Table, colors: AppColors, ac: Color) {
+    if (table.rows.isEmpty()) return
+    val bd = Color(0xFFBDBDBD)
+    val hb = ac.copy(alpha = 0.12f)
+    Column(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        for ((ri, row) in table.rows.withIndex()) {
+            val bg = when {
+                row.isHeader -> hb
+                ri % 2 == 1 -> Color(0xFFF5F5F5)
+                else -> Color.Transparent
+            }
+            Row(modifier = Modifier.background(bg).height(IntrinsicSize.Min)) {
+                for (cell in row.cells) {
+                    for (s in 1..cell.gridSpan) {
+                        val cbg = if (cell.background != 0) Color(cell.background).copy(alpha = 0.15f) else Color.Transparent
+                        Column(modifier = Modifier.weight(1f, fill = false).defaultMinSize(minWidth = 60.dp).background(cbg).padding(horizontal = 6.dp, vertical = 4.dp)) {
+                            for (b in cell.blocks) {
+                                if (b is WordBlock.Paragraph) {
+                                    val tx = buildAnnotatedString {
+                                        for (r in b.runs) withStyle(SpanStyle(fontWeight = if (r.bold || row.isHeader) FontWeight.Bold else FontWeight.Normal, fontSize = 10.sp, color = colors.onBackground)) { append(r.text) }
+                                    }
+                                    if (tx.isNotBlank()) Text(tx, fontSize = 10.sp, lineHeight = 14.sp, maxLines = 10, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* ===== Word renderer ===== */
+@Composable
+fun WordBlockRenderer(block: WordBlock, colors: AppColors, mono: FontFamily, ac: Color, ext: String) {
+    when (block) {
+        is WordBlock.Paragraph -> {
+            if (block.runs.isEmpty() || block.runs.all { it.text.isBlank() }) {
+                Spacer(modifier = Modifier.height(8.dp))
+                return
+            }
+            val t = buildAnnotatedString {
+                for (r in block.runs) withStyle(
+                    SpanStyle(
+                        fontWeight = if (r.bold) FontWeight.Bold else FontWeight.Normal,
+                        fontStyle = if (r.italic) FontStyle.Italic else FontStyle.Normal,
+                        textDecoration = when {
+                            r.underline -> TextDecoration.Underline
+                            r.strikethrough -> TextDecoration.LineThrough
+                            else -> null
+                        },
+                        fontSize = if (r.fontSize > 0) r.fontSize.sp else 13.sp,
+                        color = if (r.color != 0) Color(r.color) else colors.onBackground
+                    )
+                ) { append(r.text) }
+            }
+            val a = when (block.alignment) {
+                DocAlignment.CENTER -> TextAlign.Center
+                DocAlignment.RIGHT -> TextAlign.End
+                DocAlignment.JUSTIFY -> TextAlign.Justify
+                else -> TextAlign.Start
+            }
+            Text(t, color = colors.onBackground, fontSize = 13.sp, lineHeight = 20.sp, textAlign = a, modifier = Modifier.fillMaxWidth(), fontFamily = if (ext in listOf("csv", "txt", "md", "html", "htm", "rtf")) mono else FontFamily.Default)
+        }
+        is WordBlock.Heading -> {
+            val fs = headingFontSize(block.level).sp
+            val fw = when (block.level) { 1 -> FontWeight.Black; 2 -> FontWeight.Bold; else -> FontWeight.SemiBold }
+            val t = buildAnnotatedString { for (r in block.runs) withStyle(SpanStyle(fontWeight = fw, fontSize = fs, color = colors.onBackground)) { append(r.text) } }
+            Text(t, modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 4.dp), lineHeight = (fs.value + 6).sp)
+        }
+        is WordBlock.Table -> renderWordTable(block, colors, ac)
+        is WordBlock.PageBreak -> Spacer(modifier = Modifier.height(24.dp))
+        is WordBlock.EmbeddedImage -> {
+            val bmp = remember(block.data) {
+                try { BitmapFactory.decodeByteArray(block.data, 0, block.data.size) } catch (_: Exception) { null }
+            }
+            if (bmp != null) Image(bitmap = bmp.asImageBitmap(), contentDescription = block.alt, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+        }
+        is WordBlock.ChartBlock -> {
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                if (block.title.isNotEmpty()) Text(block.title, color = colors.onBackground, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                val mx = block.series.flatMap { it.values }.maxOrNull() ?: 1.0
+                for (s in block.series) {
+                    Text(s.name, color = colors.muted, fontSize = 11.sp)
+                    Row(modifier = Modifier.fillMaxWidth().height(20.dp), verticalAlignment = Alignment.Bottom) {
+                        for (v in s.values) {
+                            val f = (v / mx).toFloat().coerceIn(0f, 1f)
+                            Box(modifier = Modifier.weight(1f).height((f * 18).dp).background(Color(s.color).copy(alpha = 0.7f)))
+                        }
+                    }
+                }
+            }
+        }
+        is WordBlock.ListItem -> {
+            Row(modifier = Modifier.padding(start = (block.level * 16).dp)) {
+                Text(if (block.bulleted) "\u2022 " else "${block.level + 1}. ", color = colors.muted, fontSize = 13.sp)
+                val tx = buildAnnotatedString {
+                    for (r in block.runs) withStyle(SpanStyle(fontWeight = if (r.bold) FontWeight.Bold else FontWeight.Normal, fontSize = 13.sp, color = colors.onBackground)) { append(r.text) }
+                }
+                Text(tx, color = colors.onBackground, fontSize = 13.sp, lineHeight = 20.sp)
+            }
+        }
+        is WordBlock.Unsupported -> {
+            Text("[${block.description}]", color = colors.muted, fontSize = 11.sp, fontStyle = FontStyle.Italic, modifier = Modifier.padding(vertical = 4.dp))
+        }
+    }
+}
+
+/* ===== Spreadsheet renderer ===== */
+@Composable
+fun SpreadsheetRowRenderer(row: SpreadsheetRow, colors: AppColors, ac: Color) {
+    val ih = row.cells.firstOrNull()?.bold == true
+    val bg = if (ih) ac.copy(alpha = 0.12f) else Color.Transparent
+    Row(modifier = Modifier.background(bg).height(IntrinsicSize.Min).horizontalScroll(rememberScrollState())) {
+        for (cell in row.cells) {
+            Box(modifier = Modifier.defaultMinSize(minWidth = 80.dp).padding(horizontal = 6.dp, vertical = 4.dp)) {
+                Text(cell.value, fontSize = 11.sp, fontWeight = if (ih) FontWeight.Bold else FontWeight.Normal, color = colors.onBackground, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
+            Box(modifier = Modifier.width(0.5.dp).fillMaxSize().background(Color(0xFFBDBDBD)))
+        }
+    }
+}
+
+/* ===== Presentation renderer ===== */
+@Composable
+fun SlideRenderer(slide: PresentationSlide, colors: AppColors) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Text("Slide ${slide.index + 1}", color = colors.muted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 4.dp))
+        Box(modifier = Modifier.fillMaxWidth().background(Color(0xFFF5F5F5), RoundedCornerShape(8.dp)).padding(12.dp)) {
+            Column {
+                for (el in slide.elements) {
+                    when (el) {
+                        is SlideElement.TextBox -> {
+                            val t = buildAnnotatedString {
+                                for (r in el.runs) withStyle(SpanStyle(fontWeight = if (r.bold) FontWeight.Bold else FontWeight.Normal, fontSize = el.fontSize.sp, color = colors.onBackground)) { append(r.text) }
+                            }
+                            Text(t, modifier = Modifier.padding(vertical = 2.dp))
+                        }
+                        is SlideElement.ImageElement -> {
+                            val bmp = remember(el.data) {
+                                try { BitmapFactory.decodeByteArray(el.data, 0, el.data.size) } catch (_: Exception) { null }
+                            }
+                            if (bmp != null) Image(bitmap = bmp.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                        }
+                        is SlideElement.Shape -> Text(el.description, color = colors.muted, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* ===== Text renderer ===== */
+@Composable
+fun TextBlockRenderer(block: TextBlock, colors: AppColors, mono: FontFamily) {
+    val fw = if (block.isBold) FontWeight.Bold else if (block.isHeading) FontWeight.Bold else FontWeight.Normal
+    val fs = if (block.isHeading && block.headingLevel > 0) headingFontSize(block.headingLevel).sp else 13.sp
+    val bg = if (block.isCode) Color(0xFFF5F5F5) else Color.Transparent
+    val f = if (block.isCode) mono else FontFamily.Default
+    Text(
+        text = block.text, color = colors.onBackground, fontSize = fs,
+        lineHeight = (fs.value + 7).sp, fontWeight = fw, fontFamily = f,
+        modifier = Modifier.fillMaxWidth().background(bg, RoundedCornerShape(4.dp))
+            .padding(horizontal = if (block.isCode) 8.dp else 0.dp, vertical = if (block.isCode) 4.dp else 0.dp)
+    )
+}
+
+/* ===== Main composable ===== */
+@Composable
+fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val c = LocalAppColors.current
+    val ext = fileName.substringAfterLast('.', "").lowercase()
+    val mono = FontFamily.Monospace
+    val mt = remember(uri) { ctx.contentResolver.getType(uri) ?: "" }
+
+    var doc by remember { mutableStateOf<ParsedDocument?>(null) }
+    var bmps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+    var pg by remember { mutableIntStateOf(0) }
+    var loading by remember { mutableStateOf(true) }
+    var err by remember { mutableStateOf<String?>(null) }
+    var sc by remember { mutableFloatStateOf(1f) }
+    var ox by remember { mutableFloatStateOf(0f) }
+    var oy by remember { mutableFloatStateOf(0f) }
+    val zoomed = sc > 1.05f
 
     LaunchedEffect(uri, ext) {
-        isLoading = true
-        loadError = null
-        textPages = emptyList()
-        bitmapPages = emptyList()
-
+        loading = true; err = null; doc = null; bmps = emptyList()
         withContext(Dispatchers.IO) {
             try {
                 when {
-                    ext == "pdf" || mimeType.contains("pdf") ->
-                        bitmapPages = renderPdfPages(context, uri)
-                    ext == "docx" || mimeType.contains("wordprocessingml") ->
-                        textPages = parseDocx(context, uri)
-                    ext == "doc" || mimeType.contains("msword") ->
-                        textPages = parseDocRaw(context, uri)
-                    ext == "xlsx" || mimeType.contains("spreadsheetml") ->
-                        textPages = parseXlsx(context, uri)
-                    ext == "xls" ->
-                        textPages = listOf("[XLS preview not supported — open with external app]")
-                    ext == "pptx" || mimeType.contains("presentationml") ->
-                        textPages = parsePptx(context, uri)
-                    ext == "ppt" || mimeType.contains("powerpoint") ->
-                        textPages = parsePptRaw(context, uri)
-                    ext == "csv" || mimeType.contains("csv") ->
-                        textPages = parseCsvPreview(context, uri)
-                    ext == "odt" || mimeType.contains("opendocument.text") ->
-                        textPages = parseOdt(context, uri)
-                    ext == "rtf" ->
-                        textPages = parseRtfPreview(context, uri)
-                    ext == "txt" || ext == "text" || mimeType.contains("text/plain") ->
-                        textPages = parseTxtPreview(context, uri)
-                    ext == "md" || ext == "markdown" ->
-                        textPages = parseTxtPreview(context, uri)
-                    ext == "html" || ext == "htm" || mimeType.contains("html") ->
-                        textPages = parseHtmlPreview(context, uri)
-                    else ->
-                        textPages = listOf("Preview not available for .$ext")
+                    ext == "pdf" || mt.contains("pdf") -> bmps = renderPdfPages(ctx, uri)
+                    ext == "docx" || mt.contains("wordprocessingml") -> doc = ParsedDocument.Word(DocxParser.parse(ctx, uri))
+                    ext == "doc" || mt.contains("msword") -> doc = ParsedDocument.Word(DocParser.parse(ctx, uri))
+                    ext == "xlsx" || mt.contains("spreadsheetml") -> doc = ParsedDocument.Spreadsheet(XlsxParser.parse(ctx, uri))
+                    ext == "xls" -> doc = ParsedDocument.Text(TextDocument(listOf(TextBlock("[XLS not supported]"))))
+                    ext == "pptx" || mt.contains("presentationml") -> doc = ParsedDocument.Presentation(PptxParser.parse(ctx, uri))
+                    ext == "ppt" || mt.contains("powerpoint") -> doc = ParsedDocument.Word(DocParser.parseLegacyPpt(ctx, uri))
+                    ext == "csv" || mt.contains("csv") -> doc = ParsedDocument.Spreadsheet(CsvParser.parse(ctx, uri))
+                    ext == "odt" || mt.contains("opendocument.text") -> doc = ParsedDocument.Word(OdtParser.parse(ctx, uri))
+                    ext == "rtf" -> doc = ParsedDocument.Text(RtfParser.parse(ctx, uri))
+                    ext == "txt" || ext == "text" || mt.contains("text/plain") -> doc = ParsedDocument.Text(PlainTextParser.parse(ctx, uri))
+                    ext == "md" || ext == "markdown" -> doc = ParsedDocument.Text(MarkdownParser.parse(ctx, uri))
+                    ext == "html" || ext == "htm" || mt.contains("html") -> doc = ParsedDocument.Word(HtmlParser.parse(ctx, uri))
+                    else -> doc = ParsedDocument.Text(TextDocument(listOf(TextBlock("Preview not available for .$ext"))))
                 }
-                if (textPages.isEmpty() && bitmapPages.isEmpty()) {
-                    loadError = "Could not read file content"
-                }
+                if (doc == null && bmps.isEmpty()) err = "Could not read file content"
             } catch (e: Exception) {
                 Log.e("DocPreview", "Failed to parse $ext", e)
-                loadError = "Error: ${e.message ?: "Unknown error"}"
+                err = "Error: ${e.message ?: "Unknown"}"
             }
-            isLoading = false
+            loading = false
         }
     }
 
-    val totalPages = if (bitmapPages.isNotEmpty()) bitmapPages.size else textPages.size
-    val accentColor = when (ext.uppercase()) {
-        "PDF" -> colors.pink
-        "DOCX", "DOC" -> Color(0xFF2B579A)
-        "XLSX", "XLS" -> Color(0xFF217346)
-        "PPTX", "PPT" -> Color(0xFFD04423)
-        "CSV" -> Color(0xFF00897B)
-        "ODT" -> Color(0xFF0066CC)
-        "RTF" -> Color(0xFF8B4513)
-        "TXT" -> Color(0xFF616161)
-        "MD" -> Color(0xFF455A64)
-        "HTML", "HTM" -> Color(0xFFE65100)
-        else -> colors.muted
-    }
+    val tp = if (bmps.isNotEmpty()) bmps.size else 1
+    val ac = Color(docFormatColor(ext))
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.background)
-            .safeDrawingPadding(),
-    ) {
+    Box(modifier = Modifier.fillMaxSize().background(c.background).safeDrawingPadding()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top bar — always visible, not affected by zoom
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(colors.background)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-            ) {
-                NeoIconButton(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    onClick = onBack,
-                )
+            // Top bar
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().background(c.background).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                NeoIconButton(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", onClick = onBack)
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = fileName,
-                        color = colors.onBackground,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (totalPages > 0) {
-                        Text(
-                            text = "Page ${currentPage + 1} of $totalPages" +
-                                    if (isZoomed) " • ${String.format("%.1f", scale)}×" else "",
-                            color = colors.muted,
-                            fontSize = 12.sp,
-                        )
-                    }
+                    Text(fileName, color = c.onBackground, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Page ${pg + 1} of $tp" + if (zoomed) " \u2022 ${String.format("%.1f", sc)}\u00d7" else "", color = c.muted, fontSize = 12.sp)
                 }
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = accentColor,
-                        strokeWidth = 2.dp,
-                    )
-                }
+                if (loading) CircularProgressIndicator(modifier = Modifier.size(24.dp), color = ac, strokeWidth = 2.dp)
             }
-
             // Accent line
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .background(accentColor),
-            )
-
-            // Zoomable content area — clipped so zoom doesn't overlap top bar
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clipToBounds(),
-            ) {
-                // Content (scrolls normally at 1×, pans when zoomed)
+            Box(modifier = Modifier.fillMaxWidth().height(3.dp).background(ac))
+            // Content
+            Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = offsetX,
-                            translationY = offsetY,
-                        )
-                        // Pinch-to-zoom + pan
-                        .pointerInput(isZoomed) {
-                            detectTransformGestures { centroid, pan, zoom, _ ->
-                                val newScale = (scale * zoom).coerceIn(1f, 5f)
-                                val scaleChange = newScale / scale
-
-                                // Offset toward the centroid for natural zoom
-                                offsetX = (offsetX + pan.x) * scaleChange +
-                                        centroid.x * (1f - scaleChange)
-                                offsetY = (offsetY + pan.y) * scaleChange +
-                                        centroid.y * (1f - scaleChange)
-
-                                scale = newScale
-
-                                // Clamp when returning to 1×
-                                if (scale <= 1.05f) {
-                                    scale = 1f
-                                    offsetX = 0f
-                                    offsetY = 0f
-                                }
+                    modifier = Modifier.fillMaxSize()
+                        .graphicsLayer(scaleX = sc, scaleY = sc, translationX = ox, translationY = oy)
+                        .pointerInput(zoomed) {
+                            detectTransformGestures { cen, pan, zm, _ ->
+                                val ns = (sc * zm).coerceIn(1f, 5f)
+                                val s2 = ns / sc
+                                ox = (ox + pan.x) * s2 + cen.x * (1f - s2)
+                                oy = (oy + pan.y) * s2 + cen.y * (1f - s2)
+                                sc = ns
+                                if (sc <= 1.05f) { sc = 1f; ox = 0f; oy = 0f }
                             }
                         }
-                        // Double-tap to toggle zoom (1× ↔ 2.5×)
                         .pointerInput(Unit) {
-                            detectTapGestures(
-                                onDoubleTap = { offset ->
-                                    if (scale > 1.05f) {
-                                        // Currently zoomed → reset to 1×
-                                        scale = 1f
-                                        offsetX = 0f
-                                        offsetY = 0f
-                                    } else {
-                                        // At 1× → zoom to 2.5× centered on tap
-                                        scale = 2.5f
-                                        // Center the view on the tapped point
-                                        offsetX = (size.width / 2f - offset.x) * 1.5f
-                                        offsetY = (size.height / 2f - offset.y) * 1.5f
-                                    }
-                                },
-                            )
+                            detectTapGestures(onDoubleTap = { o ->
+                                if (sc > 1.05f) {
+                                    sc = 1f; ox = 0f; oy = 0f
+                                } else {
+                                    sc = 2.5f
+                                    ox = (size.width / 2f - o.x) * 1.5f
+                                    oy = (size.height / 2f - o.y) * 1.5f
+                                }
+                            })
                         }
                 ) {
                     when {
-                        isLoading -> {
+                        loading -> {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(48.dp),
-                                        color = accentColor,
-                                        strokeWidth = 4.dp,
-                                    )
+                                    CircularProgressIndicator(modifier = Modifier.size(48.dp), color = ac, strokeWidth = 4.dp)
                                     Spacer(modifier = Modifier.height(12.dp))
-                                    Text("Loading preview…", color = colors.muted, fontSize = 14.sp)
+                                    Text("Loading preview\u2026", color = c.muted, fontSize = 14.sp)
                                 }
                             }
                         }
-                        loadError != null -> {
+                        err != null -> {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(loadError!!, color = colors.pink, fontSize = 14.sp)
+                                Text(err!!, color = c.pink, fontSize = 14.sp)
                             }
                         }
-                        bitmapPages.isNotEmpty() -> {
-                            val listState = rememberLazyListState()
+                        bmps.isNotEmpty() -> {
+                            val ls = rememberLazyListState()
                             LazyColumn(
-                                state = listState,
-                                modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(8.dp),
+                                state = ls, modifier = Modifier.fillMaxSize(),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                                userScrollEnabled = !isZoomed,
+                                userScrollEnabled = !zoomed
                             ) {
-                                itemsIndexed(bitmapPages) { index, pageBmp ->
-                                    Image(
-                                        bitmap = pageBmp.asImageBitmap(),
-                                        contentDescription = "Page ${index + 1}",
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color.White),
-                                    )
+                                itemsIndexed(bmps) { i, b ->
+                                    Image(bitmap = b.asImageBitmap(), contentDescription = "Page ${i + 1}", modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color.White))
                                 }
                             }
-                            LaunchedEffect(listState.firstVisibleItemIndex) {
-                                currentPage = listState.firstVisibleItemIndex
-                            }
+                            LaunchedEffect(ls.firstVisibleItemIndex) { pg = ls.firstVisibleItemIndex }
                         }
-                        textPages.isNotEmpty() -> {
-                            val listState = rememberLazyListState()
+                        doc != null -> {
+                            val ls = rememberLazyListState()
                             LazyColumn(
-                                state = listState,
-                                modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                                userScrollEnabled = !isZoomed,
+                                state = ls, modifier = Modifier.fillMaxSize(),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                userScrollEnabled = !zoomed
                             ) {
-                                itemsIndexed(textPages) { index, pageText ->
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(colors.surface, RoundedCornerShape(12.dp))
-                                            .padding(16.dp),
-                                    ) {
-                                        if (totalPages > 1) {
-                                            Text(
-                                                text = "— Page ${index + 1} —",
-                                                color = accentColor,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(bottom = 8.dp),
-                                            )
+                                when (val d = doc!!) {
+                                    is ParsedDocument.Word -> itemsIndexed(d.doc.blocks) { _, b -> WordBlockRenderer(b, c, mono, ac, ext) }
+                                    is ParsedDocument.Spreadsheet -> {
+                                        item {
+                                            Text(d.doc.sheets.firstOrNull()?.name ?: "Sheet", color = ac, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                                         }
-                                        val isMonospace = ext in listOf("csv", "txt", "md", "html", "htm", "rtf", "xls", "xlsx")
-                                        val text = pageText.trimEnd()
-                                        if (text.isNotEmpty()) {
-                                            Text(
-                                                text = text,
-                                                color = colors.onBackground,
-                                                fontSize = 13.sp,
-                                                lineHeight = 20.sp,
-                                                fontFamily = if (isMonospace) monospace else FontFamily.Default,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .then(
-                                                        if (isMonospace) Modifier.horizontalScroll(rememberScrollState())
-                                                        else Modifier
-                                                    ),
-                                            )
-                                        }
+                                        itemsIndexed(d.doc.sheets.flatMap { it.rows }) { _, r -> SpreadsheetRowRenderer(r, c, ac) }
                                     }
-                                    Spacer(modifier = Modifier.height(8.dp))
+                                    is ParsedDocument.Presentation -> itemsIndexed(d.doc.slides) { _, s -> SlideRenderer(s, c) }
+                                    is ParsedDocument.Text -> itemsIndexed(d.doc.blocks) { _, b -> TextBlockRenderer(b, c, mono) }
                                 }
                             }
-                            LaunchedEffect(listState.firstVisibleItemIndex) {
-                                currentPage = listState.firstVisibleItemIndex
-                            }
+                            LaunchedEffect(ls.firstVisibleItemIndex) { pg = ls.firstVisibleItemIndex }
                         }
                     }
                 }
             }
         }
     }
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  Parsers
-// ═══════════════════════════════════════════════════════════════
-
-/** PDF → Bitmap pages via PdfRenderer */
-private fun renderPdfPages(context: android.content.Context, uri: Uri): List<Bitmap> {
-    val pages = mutableListOf<Bitmap>()
-    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-        PdfRenderer(pfd).use { renderer ->
-            val scale = 2f
-            for (i in 0 until renderer.pageCount) {
-                val page = renderer.openPage(i)
-                val w = (page.width * scale).toInt()
-                val h = (page.height * scale).toInt()
-                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                bmp.eraseColor(android.graphics.Color.WHITE)
-                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                page.close()
-                pages.add(bmp)
-            }
-        }
-    }
-    return pages
-}
-
-/** DOCX → text pages parsed from word/document.xml in the ZIP */
-private fun parseDocx(context: android.content.Context, uri: Uri): List<String> {
-    val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
-    val bytes = input.use { it.readBytes() }
-
-    val zipIn = ZipInputStream(ByteArrayInputStream(bytes))
-    var documentXml = ""
-    var entry = zipIn.nextEntry
-    while (entry != null) {
-        if (entry.name == "word/document.xml") {
-            documentXml = zipIn.bufferedReader().readText()
-            break
-        }
-        entry = zipIn.nextEntry
-    }
-    zipIn.close()
-
-    if (documentXml.isEmpty()) return listOf("Empty document")
-
-    val tagRegex = Regex("""<[^>]+>""")
-    val sections = documentXml.split(Regex("""<w:p[\s>]"""))
-    val paragraphs = sections.mapNotNull { section ->
-        val text = tagRegex.replace(section, "").trim()
-        if (text.isNotEmpty()) text else null
-    }
-
-    return if (paragraphs.isEmpty()) listOf("Empty document")
-    else paragraphs.chunked(40).map { chunk -> chunk.joinToString("\n\n") }
-}
-
-/** DOC (legacy OLE2) → extract readable text from raw bytes */
-private fun parseDocRaw(context: android.content.Context, uri: Uri): List<String> {
-    val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
-    val bytes = input.use { it.readBytes() }
-    val text = extractReadableText(bytes)
-    return if (text.isBlank()) listOf("Could not extract text from DOC file")
-    else text.chunked(2000).map { it }
-}
-
-/** XLSX → text pages parsed from the ZIP */
-private fun parseXlsx(context: android.content.Context, uri: Uri): List<String> {
-    val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
-    val bytes = input.use { it.readBytes() }
-
-    val zipIn = ZipInputStream(ByteArrayInputStream(bytes))
-    val zipEntries = mutableMapOf<String, String>()
-    var entry = zipIn.nextEntry
-    while (entry != null) {
-        if (entry.name == "xl/sharedStrings.xml" ||
-            entry.name.startsWith("xl/worksheets/sheet") ||
-            entry.name == "xl/workbook.xml"
-        ) {
-            zipEntries[entry.name] = zipIn.bufferedReader().readText()
-        }
-        entry = zipIn.nextEntry
-    }
-    zipIn.close()
-
-    val sharedStrings = parseSharedStrings(zipEntries["xl/sharedStrings.xml"] ?: "")
-
-    val pages = mutableListOf<String>()
-    val sheetEntries = zipEntries.keys.filter { it.startsWith("xl/worksheets/sheet") }.sorted()
-    for (sheetName in sheetEntries) {
-        val sheetXml = zipEntries[sheetName] ?: continue
-        val sb = StringBuilder()
-        val sheetNum = sheetName.replace("xl/worksheets/sheet", "").replace(".xml", "")
-        sb.appendLine("═══ Sheet $sheetNum ═══")
-        sb.appendLine()
-
-        val rowRegex = Regex("""<row[^>]*>(.*?)</row>""", RegexOption.DOT_MATCHES_ALL)
-        val cellRegex = Regex("""<c[^>]*r="([^"]*)"[^>]*>(?:<v>([^<]*)</v>)?</c>""", RegexOption.DOT_MATCHES_ALL)
-
-        for (rowMatch in rowRegex.findAll(sheetXml)) {
-            val cells = mutableListOf<String>()
-            for (cellMatch in cellRegex.findAll(rowMatch.groupValues[1])) {
-                val value = cellMatch.groupValues[2]
-                val cellType = if (cellMatch.value.contains("""t="s"""")) "s" else "n"
-                val display = if (cellType == "s" && value.isNotEmpty()) {
-                    val idx = value.toIntOrNull() ?: -1
-                    if (idx in sharedStrings.indices) sharedStrings[idx] else value
-                } else if (value.isNotEmpty()) {
-                    val d = value.toDoubleOrNull()
-                    if (d != null && d == d.toLong().toDouble()) d.toLong().toString() else value
-                } else {
-                    ""
-                }
-                cells.add(display)
-            }
-            if (cells.any { it.isNotEmpty() }) {
-                sb.appendLine(cells.joinToString(" | ") { if (it.isEmpty()) "—" else it })
-            }
-        }
-        pages.add(sb.toString())
-    }
-
-    return if (pages.isEmpty()) listOf("Empty spreadsheet") else pages
-}
-
-private fun parseSharedStrings(xml: String): List<String> {
-    if (xml.isEmpty()) return emptyList()
-    val result = mutableListOf<String>()
-    val tagRegex = Regex("""<[^>]+>""")
-    val siRegex = Regex("""<si>(.*?)</si>""", RegexOption.DOT_MATCHES_ALL)
-    for (match in siRegex.findAll(xml)) {
-        val text = tagRegex.replace(match.groupValues[1], "").trim()
-        result.add(text)
-    }
-    return result
-}
-
-/** PPTX → text pages parsed from slide XMLs */
-private fun parsePptx(context: android.content.Context, uri: Uri): List<String> {
-    val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
-    val bytes = input.use { it.readBytes() }
-
-    val zipIn = ZipInputStream(ByteArrayInputStream(bytes))
-    val slideXmls = mutableListOf<String>()
-    var entry = zipIn.nextEntry
-    while (entry != null) {
-        if (entry.name.startsWith("ppt/slides/slide") && entry.name.endsWith(".xml")) {
-            slideXmls.add(zipIn.bufferedReader().readText())
-        }
-        entry = zipIn.nextEntry
-    }
-    zipIn.close()
-
-    if (slideXmls.isEmpty()) return listOf("Empty presentation")
-
-    val pages = mutableListOf<String>()
-    for ((idx, slideXml) in slideXmls.withIndex()) {
-        val sb = StringBuilder()
-        sb.appendLine("═══ Slide ${idx + 1} ═══")
-        sb.appendLine()
-        val textRegex = Regex("""<a:t>([^<]+)</a:t>""")
-        val texts = textRegex.findAll(slideXml).map { it.groupValues[1].trim() }.filter { it.isNotEmpty() }.toList()
-        if (texts.isNotEmpty()) {
-            for (t in texts) sb.appendLine(t)
-        } else {
-            sb.appendLine("[No text content]")
-        }
-        pages.add(sb.toString())
-    }
-    return pages
-}
-
-/** PPT (legacy) → extract readable text from raw bytes */
-private fun parsePptRaw(context: android.content.Context, uri: Uri): List<String> {
-    val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
-    val bytes = input.use { it.readBytes() }
-    val text = extractReadableText(bytes)
-    return if (text.isBlank()) listOf("Could not extract text from PPT file")
-    else text.chunked(2000).map { it }
-}
-
-/** CSV → formatted table pages */
-private fun parseCsvPreview(context: android.content.Context, uri: Uri): List<String> {
-    val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
-    val reader = BufferedReader(InputStreamReader(input))
-    val lines = reader.use { it.readLines() }
-    if (lines.isEmpty()) return listOf("Empty CSV file")
-
-    val delimiter = if (lines.first().contains('\t')) '\t' else ','
-    val rowsPerPage = 30
-    val pages = mutableListOf<String>()
-
-    for (chunk in lines.chunked(rowsPerPage)) {
-        val sb = StringBuilder()
-        for (line in chunk) {
-            val cells = parseCsvLine(line, delimiter)
-            sb.appendLine(cells.joinToString(" | ") { if (it.isEmpty()) "—" else it })
-        }
-        pages.add(sb.toString())
-    }
-    return pages
-}
-
-private fun parseCsvLine(line: String, delimiter: Char): List<String> {
-    val result = mutableListOf<String>()
-    val current = StringBuilder()
-    var inQuotes = false
-    for (c in line) {
-        when {
-            c == '"' -> inQuotes = !inQuotes
-            c == delimiter && !inQuotes -> {
-                result.add(current.toString().trim())
-                current.clear()
-            }
-            else -> current.append(c)
-        }
-    }
-    result.add(current.toString().trim())
-    return result
-}
-
-/** ODT → extract text from content.xml */
-private fun parseOdt(context: android.content.Context, uri: Uri): List<String> {
-    val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
-    val bytes = input.use { it.readBytes() }
-
-    val zipIn = ZipInputStream(ByteArrayInputStream(bytes))
-    var contentXml = ""
-    var entry = zipIn.nextEntry
-    while (entry != null) {
-        if (entry.name == "content.xml") {
-            contentXml = zipIn.bufferedReader().readText()
-            break
-        }
-        entry = zipIn.nextEntry
-    }
-    zipIn.close()
-
-    if (contentXml.isEmpty()) return listOf("Empty document")
-
-    val paraRegex = Regex("""<text:p[^>]*>(.*?)</text:p>""", RegexOption.DOT_MATCHES_ALL)
-    val tagRegex = Regex("""<[^>]+>""")
-    val paragraphs = paraRegex.findAll(contentXml).map { match ->
-        tagRegex.replace(match.groupValues[1], "").trim()
-    }.filter { it.isNotEmpty() }.toList()
-
-    if (paragraphs.isEmpty()) return listOf("Empty document")
-    return paragraphs.chunked(40).map { chunk -> chunk.joinToString("\n\n") }
-}
-
-/** RTF → strip control words and show plain text */
-private fun parseRtfPreview(context: android.content.Context, uri: Uri): List<String> {
-    val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
-    val text = input.use { it.bufferedReader().readText() }
-    val cleaned = text
-        .replace(Regex("""\{\\rtf1[^}]*\}"""), "")
-        .replace(Regex("""\\'[0-9a-fA-F]{2}"""), "")
-        .replace(Regex("""\\u\d+;?"""), "")
-        .replace(Regex("""\\\w+\s?"""), "")
-        .replace(Regex("""\{[^}]*\}"""), "")
-        .replace("\\", "")
-        .replace("\r\n", "\n")
-        .replace("\r", "\n")
-        .trim()
-    if (cleaned.isEmpty()) return listOf("Empty RTF document")
-    return cleaned.chunked(2000).map { it }
-}
-
-/** TXT / MD → split into page-sized chunks */
-private fun parseTxtPreview(context: android.content.Context, uri: Uri): List<String> {
-    val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
-    val text = input.use { it.bufferedReader().readText() }
-    if (text.isBlank()) return listOf("Empty file")
-    val linesPerPage = 50
-    return text.lines().chunked(linesPerPage).map { chunk -> chunk.joinToString("\n") }
-}
-
-/** HTML → strip tags and show text */
-private fun parseHtmlPreview(context: android.content.Context, uri: Uri): List<String> {
-    val input = context.contentResolver.openInputStream(uri) ?: return emptyList()
-    val html = input.use { it.bufferedReader().readText() }
-    val plain = html
-        .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
-        .replace(Regex("""</p>""", RegexOption.IGNORE_CASE), "\n\n")
-        .replace(Regex("""</div>""", RegexOption.IGNORE_CASE), "\n")
-        .replace(Regex("""</h[1-6]>""", RegexOption.IGNORE_CASE), "\n\n")
-        .replace(Regex("""</li>""", RegexOption.IGNORE_CASE), "\n")
-        .replace(Regex("""<[^>]+>"""), "")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&nbsp;", " ")
-        .replace(Regex("""\n{3,}"""), "\n\n")
-        .trim()
-    if (plain.isEmpty()) return listOf("Empty HTML file")
-    val linesPerPage = 50
-    return plain.lines().chunked(linesPerPage).map { chunk -> chunk.joinToString("\n") }
-}
-
-/** Generic extractor for binary files: scans for printable text runs */
-private fun extractReadableText(bytes: ByteArray): String {
-    val result = StringBuilder()
-
-    // UTF-16LE scan
-    val utf16Runs = mutableListOf<String>()
-    var currentRun = StringBuilder()
-    var i = 0
-    while (i < bytes.size - 1) {
-        val lo = bytes[i].toInt() and 0xFF
-        val hi = bytes[i + 1].toInt() and 0xFF
-        if (lo in 0x20..0x7E && hi == 0) {
-            currentRun.append(lo.toChar())
-        } else if (currentRun.length >= 4) {
-            utf16Runs.add(currentRun.toString())
-            currentRun = StringBuilder()
-        } else {
-            currentRun = StringBuilder()
-        }
-        i += 2
-    }
-    if (currentRun.length >= 4) utf16Runs.add(currentRun.toString())
-
-    val uniqueRuns = utf16Runs.distinct().sortedByDescending { it.length }
-    val realText = uniqueRuns.filter { run ->
-        val alphaCount = run.count { it.isLetter() }
-        alphaCount > run.length * 0.5
-    }
-
-    for (run in realText) {
-        result.appendLine(run)
-        result.appendLine()
-    }
-
-    // ASCII fallback
-    if (result.length < 50) {
-        result.clear()
-        currentRun = StringBuilder()
-        for (b in bytes) {
-            val c = b.toInt() and 0xFF
-            if (c in 0x20..0x7E || c == '\n'.code || c == '\r'.code || c == '\t'.code) {
-                currentRun.append(c.toChar())
-            } else {
-                if (currentRun.length >= 8) {
-                    result.appendLine(currentRun.toString())
-                }
-                currentRun = StringBuilder()
-            }
-        }
-        if (currentRun.length >= 8) {
-            result.appendLine(currentRun.toString())
-        }
-    }
-
-    return result.toString().trim()
 }
