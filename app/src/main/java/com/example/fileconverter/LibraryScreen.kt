@@ -309,6 +309,7 @@ private fun FileTile(
         "CSV" -> Color(0xFF00897B)
         "PPT" -> Color(0xFFB71C1C)
         "DOCX" -> Color(0xFF2B579A)
+        "DOC" -> Color(0xFF1A4B8E)
         "ODT" -> Color(0xFF0066CC)
         "RTF" -> Color(0xFF8B4513)
         "TXT" -> Color(0xFF616161)

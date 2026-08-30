@@ -299,6 +299,7 @@ private fun FileConverterScreen(
                 "CSV" to Color(0xFF00897B),
                 "PPT" to Color(0xFFB71C1C),
                 "DOCX" to Color(0xFF2B579A),
+                "DOC" to Color(0xFF1A4B8E),
                 "ODT" to Color(0xFF0066CC),
                 "RTF" to Color(0xFF8B4513),
                 "TXT" to Color(0xFF616161),

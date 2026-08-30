@@ -117,6 +117,8 @@ object ImageConverter {
                     renderDocThumbnail(context, uri, name, "PPT", maxDim)
                 name.endsWith(".docx", ignoreCase = true) ->
                     renderDocThumbnail(context, uri, name, "DOCX", maxDim)
+                name.endsWith(".doc", ignoreCase = true) ->
+                    renderDocThumbnail(context, uri, name, "DOC", maxDim)
                 name.endsWith(".odt", ignoreCase = true) ->
                     renderDocThumbnail(context, uri, name, "ODT", maxDim)
                 name.endsWith(".rtf", ignoreCase = true) ->
@@ -453,6 +455,7 @@ object ImageConverter {
                 "CSV" -> 0xFF00897B.toInt()
                 "PPT" -> 0xFFB71C1C.toInt()
                 "DOCX" -> 0xFF2B579A.toInt()
+                "DOC" -> 0xFF1A4B8E.toInt()
                 "ODT" -> 0xFF0066CC.toInt()
                 "RTF" -> 0xFF8B4513.toInt()
                 "TXT" -> 0xFF616161.toInt()
@@ -467,6 +470,7 @@ object ImageConverter {
                 "CSV" -> extractCsvPreviewText(bytes)
                 "PPT" -> extractPptPreviewText(bytes)
                 "DOCX" -> extractDocxPreviewText(bytes)
+                "DOC" -> extractDocPreviewText(bytes)
                 "ODT" -> extractPlainTextPreview(bytes)
                 "RTF" -> extractRtfPreviewText(bytes)
                 "TXT" -> extractPlainTextPreview(bytes)
@@ -641,6 +645,26 @@ object ImageConverter {
             }
             sb.toString().ifEmpty { "DOCX document" }
         } catch (_: Exception) { "DOCX document" }
+    }
+
+    private fun extractDocPreviewText(data: ByteArray): String {
+        // DOC is a legacy OLE2 binary format. Extract readable text bytes.
+        return try {
+            // Find text-like runs in the binary data
+            val sb = StringBuilder()
+            var i = 0
+            while (i < data.size && sb.length < 200) {
+                val b = data[i].toInt() and 0xFF
+                if (b in 0x20..0x7E || b == 0x0A || b == 0x0D) {
+                    sb.append(b.toChar())
+                } else if (sb.isNotEmpty() && !sb.endsWith(' ')) {
+                    sb.append(' ')
+                }
+                i++
+            }
+            val text = sb.toString().trim()
+            if (text.length > 5) text.take(200) else "DOC document"
+        } catch (_: Exception) { "DOC document" }
     }
 
     private fun extractPlainTextPreview(data: ByteArray): String {
