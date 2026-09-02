@@ -51,16 +51,61 @@ object DocParser {
         fun flushCell() { currentRow.add(currentCell.toString().trim()); currentCell = StringBuilder() }
         fun flushRow() { flushCell(); if (currentRow.isNotEmpty()) { tableRows.add(currentRow.toList()); currentRow = mutableListOf() } }
         fun flushParagraph() { val t = sb.toString().trim(); if (t.isNotEmpty()) blocks += WordBlock.Paragraph(listOf(WordRun(t))); sb.setLength(0) }
-        fun finalizeTable() { flushRow()
-            if (tableRows.size >= 2 && tableRows.maxOf { it.size } >= 2) blocks += WordBlock.Table(rows = tableRows.map { r -> WordTableRow(cells = r.map { c -> WordTableCell(listOf(WordBlock.Paragraph(listOf(WordRun(c))))) }) })
-            else for (r in tableRows) blocks += WordBlock.Paragraph(listOf(WordRun(r.joinToString("    ")))); tableRows.clear(); inTable = false }
+        fun emitTable() {
+            if (tableRows.size >= 2 && tableRows.maxOf { it.size } >= 2) {
+                blocks += WordBlock.Table(rows = tableRows.map { r ->
+                    WordTableRow(cells = r.map { c ->
+                        WordTableCell(listOf(WordBlock.Paragraph(listOf(WordRun(c)))))
+                    })
+                })
+            } else {
+                // Too small for a real table — emit as paragraphs
+                for (r in tableRows) blocks += WordBlock.Paragraph(listOf(WordRun(r.joinToString("    "))))
+            }
+            tableRows.clear(); currentRow.clear(); inTable = false
+        }
         var i = 0; while (i < raw.length) { val c = raw[i]; when {
-            c == '\u0013' -> inFieldCode = true; c == '\u0014' -> inFieldCode = false; c == '\u0015' -> Unit; inFieldCode -> Unit
-            c == DocTextExtractor.CELL_MARKER -> { inTable = true; flushCell() }; c == DocTextExtractor.ROW_MARKER -> { inTable = true; flushRow() }
-            c == '\r' || c == '\n' -> { if (inTable) { flushCell(); var peek = i + 1; while (peek < raw.length && (raw[peek] == '\r' || raw[peek] == '\n')) peek++; if (peek >= raw.length || (raw[peek] != DocTextExtractor.CELL_MARKER && raw[peek] != DocTextExtractor.ROW_MARKER && raw[peek] != '\t' && raw[peek] != ' ')) { if (tableRows.isNotEmpty()) finalizeTable() } } else flushParagraph() }
-            c == '\u000C' -> flushParagraph(); c == '\t' -> { if (inTable) currentCell.append("    ") else sb.append("    ") }
-            c.code < 0x20 || c == '\u007F' || c == '\uFFFF' -> Unit; else -> { if (inTable) currentCell.append(c) else sb.append(c) } }; i++ }
-        if (inTable) finalizeTable() else flushParagraph()
+            c == '\u0013' -> inFieldCode = true
+            c == '\u0014' -> inFieldCode = false
+            c == '\u0015' -> Unit
+            inFieldCode -> Unit
+            c == DocTextExtractor.CELL_MARKER -> {
+                // Transition from non-table to table: flush sb as first cell
+                if (!inTable) {
+                    inTable = true
+                    val t = sb.toString().trim()
+                    if (t.isNotEmpty()) currentCell.append(t)
+                    sb.setLength(0)
+                }
+                flushCell()
+            }
+            c == DocTextExtractor.ROW_MARKER -> {
+                if (!inTable) inTable = true
+                flushRow()
+            }
+            c == '\r' || c == '\n' -> {
+                if (inTable) {
+                    flushCell()
+                    // \r marks end of a row in DOC tables — flush the row
+                    if (currentRow.isNotEmpty()) {
+                        tableRows.add(currentRow.toList()); currentRow = mutableListOf()
+                    }
+                    // Peek: if no more table markers follow, finalize
+                    var peek = i + 1
+                    while (peek < raw.length && (raw[peek] == '\r' || raw[peek] == '\n')) peek++
+                    if (peek >= raw.length || (raw[peek] != DocTextExtractor.CELL_MARKER && raw[peek] != DocTextExtractor.ROW_MARKER)) {
+                        emitTable()
+                    }
+                } else {
+                    flushParagraph()
+                }
+            }
+            c == '\u000C' -> flushParagraph()
+            c == '\t' -> { if (inTable) currentCell.append("    ") else sb.append("    ") }
+            c.code < 0x20 || c == '\u007F' || c == '\uFFFF' -> Unit
+            else -> { if (inTable) currentCell.append(c) else sb.append(c) }
+        }; i++ }
+        if (inTable) emitTable() else flushParagraph()
     }
 
     private fun parseAsParagraphs(raw: String, blocks: MutableList<WordBlock>) {

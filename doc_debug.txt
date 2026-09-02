@@ -1,0 +1,58 @@
+Text length: 33248
+hasTableMarkers: true
+First 800 chars:
+[CR][CR][CR]INVENTORI PERSONALITI SIDEK[CR]Sidek’s Personality Inventory[CR]IPS[CR][CR][CR][CR]IPS[CR][CR][CR][CR][CR][CR][CR]Oleh:[CR][CR]DR. SIDEK MOHD NOAH, Ph.D[CR][CR][CR][CR][CR]INVENTORI PERSONALITI SIDEK[CR]Sidek’s Personality Inventory[CR]IPS[CR][CR]Arahan:[CR][CR]Inventori ini mengandungi 160 item atau pernyataan. Bermula dengan nombor satu, rekodkan jawapan anda pada borang jawapan yang disediakan.[CR][CR]Jika pernyataan itu menerangkan diri anda, tandakan pada ‘Ya’ dan jika tidak menerangkan diri anda, tandakan pada ‘Tidak” pada borang jawapan yang disediakan.[CR][CR]Jika anda menghadapi kesukaran untuk menentukan sama ada sesuatu pernyataan itu menerangkan diri anda ataupun tidak, pilih jawapan yang anda rasa paling selesa. JAWAB SEMUA ITEM. [CR][CR][CR][CR]Bil.ItemYaTidak1Selesa memberitahu kawan-kawan mengenai apa-apa sahaja yang ada dalam fikiran saya.  2Lebih suka bekerj
+Blocks: 15
+Tables: 0
+Paragraphs: 15
+[0] PARA "INVENTORI PERSONALITI SIDEK"
+[1] PARA "Sidek’s Personality Inventory"
+[2] PARA "IPS"
+[3] PARA "IPS"
+[4] PARA "Oleh:"
+[5] PARA "DR. SIDEK MOHD NOAH, Ph.D"
+[6] PARA "INVENTORI PERSONALITI SIDEK"
+[7] PARA "Sidek’s Personality Inventory"
+[8] PARA "IPS"
+[9] PARA "Arahan:"
+[10] PARA "Inventori ini mengandungi 160 item atau pernyataan. Bermula "
+[11] PARA "Jika pernyataan itu menerangkan diri anda, tandakan pada ‘Ya"
+[12] PARA "Jika anda menghadapi kesukaran untuk menentukan sama ada ses"
+[13] PARA "Bil."
+[14] PARA "    Item    Ya    Tidak        1    Selesa memberitahu kawan"
+
+=== PAGE RENDERER ===
+Layout lines: 200
+Pages rendered: 5
+Page size: 1080x1527
+Block types: {Paragraph=15}
+[0] TEXT("INVENTORI PERSONALITI SIDEK" fs=12.0 bold=false)
+[1] SPACING 8.0
+[2] TEXT("Sidek’s Personality Inventory" fs=12.0 bold=false)
+[3] SPACING 8.0
+[4] TEXT("IPS" fs=12.0 bold=false)
+[5] SPACING 8.0
+[6] TEXT("IPS" fs=12.0 bold=false)
+[7] SPACING 8.0
+[8] TEXT("Oleh:" fs=12.0 bold=false)
+[9] SPACING 8.0
+[10] TEXT("DR. SIDEK MOHD NOAH, Ph.D" fs=12.0 bold=false)
+[11] SPACING 8.0
+[12] TEXT("INVENTORI PERSONALITI SIDEK" fs=12.0 bold=false)
+[13] SPACING 8.0
+[14] TEXT("Sidek’s Personality Inventory" fs=12.0 bold=false)
+[15] SPACING 8.0
+[16] TEXT("IPS" fs=12.0 bold=false)
+[17] SPACING 8.0
+[18] TEXT("Arahan:" fs=12.0 bold=false)
+[19] SPACING 8.0
+[20] TEXT("Inventori ini mengandungi 160 item atau pernyataan" fs=12.0 bold=false)
+[21] SPACING 8.0
+[22] TEXT("Jika pernyataan itu menerangkan diri anda, tandaka" fs=12.0 bold=false)
+[23] SPACING 8.0
+[24] TEXT("Jika anda menghadapi kesukaran untuk menentukan sa" fs=12.0 bold=false)
+[25] TEXT("SEMUA ITEM." fs=12.0 bold=false)
+[26] SPACING 8.0
+[27] TEXT("Bil." fs=12.0 bold=false)
+[28] SPACING 8.0
+[29] TEXT("Item Ya Tidak 1 Selesa memberitahu kawan-kawan men" fs=12.0 bold=false)

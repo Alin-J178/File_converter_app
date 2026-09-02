@@ -50,7 +50,31 @@ object DocPageRenderer {
         }
 
         // Split lines into pages
-        return paginateToBitmaps(lines)
+        val pages = paginateToBitmaps(lines)
+
+        // Debug: write page info to file
+        try {
+            val f = java.io.File("/sdcard/Documents/doc_debug.txt")
+            f.appendText(buildString {
+                appendLine("\n=== PAGE RENDERER ===")
+                appendLine("Layout lines: ${lines.size}")
+                appendLine("Pages rendered: ${pages.size}")
+                appendLine("Page size: ${PAGE_WIDTH}x${PAGE_HEIGHT}")
+                appendLine("Block types: ${doc.blocks.groupBy { it::class.simpleName }.mapValues { it.value.size }}")
+                lines.take(30).forEachIndexed { idx, l ->
+                    when (l) {
+                        is LayoutLine.Text -> appendLine("[$idx] TEXT(\"${l.text.take(50)}\" fs=${l.fontSize} bold=${l.isBold})")
+                        is LayoutLine.TableRow -> appendLine("[$idx] TABLEROW ${l.colCount}c hdr=${l.isHeader} ${l.cells.joinToString(" | ") { it.take(20) }}")
+                        is LayoutLine.Spacing -> appendLine("[$idx] SPACING ${l.height}")
+                        is LayoutLine.ImageLine -> appendLine("[$idx] IMAGE ${l.width}x${l.height}")
+                        is LayoutLine.PageBreak -> appendLine("[$idx] PAGEBREAK")
+                        else -> appendLine("[$idx] ${l::class.simpleName}")
+                    }
+                }
+            })
+        } catch (_: Exception) {}
+
+        return pages
     }
 
     // ── Layout helpers ──────────────────────────────────────────
@@ -135,12 +159,12 @@ object DocPageRenderer {
 
     private fun wrapText(text: String, fontSize: Float, isBold: Boolean, color: Int, indent: Int, lines: MutableList<LayoutLine>) {
         val paint = Paint().apply {
-            this.textSize = fontSize * 2  // Canvas uses px, we scale later
+            this.textSize = fontSize
             this.isFakeBoldText = isBold
             this.isAntiAlias = true
             typeface = if (isBold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
         }
-        val maxWidth = (USABLE_WIDTH - indent * 60) * 2  // px at 2x scale
+        val maxWidth = USABLE_WIDTH - indent * 40
         val words = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
         var currentLine = StringBuilder()
         for (word in words) {
@@ -196,22 +220,22 @@ object DocPageRenderer {
                         canvas = startNewPage()
                     }
                     val paint = Paint().apply {
-                        textSize = line.fontSize * 2
+                        textSize = line.fontSize
                         isFakeBoldText = line.isBold
                         color = line.color
                         isAntiAlias = true
                         typeface = if (line.isBold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                     }
-                    val x = (MARGIN_LEFT + line.indent * 60) * 2f
-                    canvas.drawText(line.text, x, currentY + line.fontSize * 2, paint)
-                    currentY += lineHeight * 2
+                    val x = MARGIN_LEFT + line.indent * 40.toFloat()
+                    canvas.drawText(line.text, x, currentY + line.fontSize, paint)
+                    currentY += lineHeight
                 }
                 is LayoutLine.TableRow -> {
-                    val cellHeight = 36f * 2
+                    val cellHeight = 36f
                     if (currentY + cellHeight > PAGE_HEIGHT - MARGIN_BOTTOM) {
                         canvas = startNewPage()
                     }
-                    val colWidth = USABLE_WIDTH * 2f / line.colCount.coerceAtLeast(1)
+                    val colWidth = USABLE_WIDTH.toFloat() / line.colCount.coerceAtLeast(1)
                     val bgPaint = Paint().apply {
                         color = if (line.isHeader) android.graphics.Color.rgb(240, 240, 240) else android.graphics.Color.TRANSPARENT
                         style = Paint.Style.FILL
@@ -230,7 +254,7 @@ object DocPageRenderer {
                     }
 
                     for ((ci, cellText) in line.cells.withIndex()) {
-                        val cellLeft = MARGIN_LEFT * 2f + ci * colWidth
+                        val cellLeft = MARGIN_LEFT.toFloat() + ci * colWidth
                         val cellTop = currentY
                         // Background
                         canvas.drawRect(cellLeft, cellTop, cellLeft + colWidth, cellTop + cellHeight, bgPaint)
@@ -244,7 +268,7 @@ object DocPageRenderer {
                     currentY += cellHeight
                 }
                 is LayoutLine.ImageLine -> {
-                    val h = line.height * 2f
+                    val h = line.height.toFloat()
                     if (currentY + h > PAGE_HEIGHT - MARGIN_BOTTOM) {
                         canvas = startNewPage()
                     }
@@ -252,10 +276,10 @@ object DocPageRenderer {
                         color = android.graphics.Color.rgb(230, 230, 230)
                         style = Paint.Style.FILL
                     }
-                    val x = MARGIN_LEFT * 2f
-                    canvas.drawRect(x, currentY, x + line.width * 2f, currentY + h, placeholderPaint)
+                    val x = MARGIN_LEFT.toFloat()
+                    canvas.drawRect(x, currentY, x + line.width.toFloat(), currentY + h, placeholderPaint)
                     val labelPaint = Paint().apply { color = android.graphics.Color.GRAY; textSize = 24f; textAlign = Paint.Align.CENTER; isAntiAlias = true }
-                    canvas.drawText("[Image]", x + line.width.toFloat(), currentY + h / 2f + 8f, labelPaint)
+                    canvas.drawText("[Image]", x + line.width / 2f, currentY + h / 2f + 8f, labelPaint)
                     currentY += h
                 }
             }
