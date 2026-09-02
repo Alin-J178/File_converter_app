@@ -38,7 +38,13 @@ object DocParser {
                 appendLine("Paragraphs: ${blocks.count { it is WordBlock.Paragraph }}")
                 blocks.take(20).forEachIndexed { idx, b ->
                     when (b) {
-                        is WordBlock.Table -> appendLine("[$idx] TABLE ${b.rows.size}r x ${b.rows.maxOfOrNull { it.cells.size } ?: 0}c")
+                        is WordBlock.Table -> {
+                            appendLine("[$idx] TABLE ${b.rows.size}r x ${b.rows.maxOfOrNull { it.cells.size } ?: 0}c")
+                            // Show last 5 rows
+                            b.rows.takeLast(5).forEachIndexed { ri, row ->
+                                appendLine("  last-r${b.rows.size - 5 + ri}: ${row.cells.joinToString(" | ") { it.blocks.filterIsInstance<WordBlock.Paragraph>().joinToString("") { p -> p.runs.joinToString("") { r -> r.text } }.take(30) }}")
+                            }
+                        }
                         is WordBlock.Paragraph -> appendLine("[$idx] PARA \"${b.runs.joinToString("") { it.text }.take(80)}\"")
                         else -> appendLine("[$idx] ${b::class.simpleName}")
                     }
@@ -100,9 +106,9 @@ object DocParser {
                 }
                 c == '\r' || c == '\n' -> {
                     if (inTable) {
-                        // \r in table context: flush cell but DON'T break the table
-                        // (rows may or may not be separated by \r)
-                        flushCellContent()
+                        // \r in table context: ignore (cells are separated by \u0007, not \r)
+                        // Just append a space so wrapped text doesn't merge words
+                        sb.append(' ')
                     } else {
                         flushCellContent()
                     }
@@ -144,58 +150,83 @@ object DocParser {
             cleanedCells.add(cell)
         }
 
-        // Detect column count by analyzing the cell pattern
-        // The first few cells form the header, which typically has the right count
-        // Try common column counts and pick the one that gives the best row alignment
+        // Detect column count from the header row
         var bestCols = 0
-        var bestScore = -1
-
-        for (tryCols in 2..10) {
-            if (cleanedCells.size < tryCols * 2) continue
-
-            // Check how well the cells align into rows of tryCols
-            // The "extra" empty cells between rows should be consistent
-            val rowCount = cleanedCells.size / tryCols
-            val remainder = cleanedCells.size % tryCols
-
-            // Score: more complete rows is better, fewer remainder cells is better
-            val score = rowCount * 100 - remainder
-
-            if (score > bestScore) {
-                bestScore = score
-                bestCols = tryCols
+        if (cleanedCells.isNotEmpty()) {
+            var headerLen = 0
+            for (ci in cleanedCells.indices) {
+                val cell = cleanedCells[ci]
+                if (ci > 0 && cell.isBlank() && ci + 1 < cleanedCells.size && cleanedCells[ci + 1].toIntOrNull() != null) {
+                    headerLen = ci; break
+                }
+                if (ci > 0 && cell.toIntOrNull() != null && !cleanedCells[ci - 1].isBlank() && cleanedCells[ci - 1].toIntOrNull() == null) {
+                    headerLen = ci; break
+                }
+                headerLen = ci + 1
             }
+            bestCols = headerLen.coerceIn(2, 10)
         }
+        if (bestCols < 2) bestCols = 4
 
-        // Also try: detect from the header pattern
-        // Count cells before the first empty cell
-        val headerEnd = cleanedCells.indexOfFirst { it.isBlank() }.coerceAtLeast(4)
-        if (headerEnd in 2..10 && headerEnd > bestCols) {
-            bestCols = headerEnd
+        // Detect if there are empty separator cells between rows
+        // Pattern: every (bestCols + 1) cells, the last one is empty (separator from \u0007\u0007)
+        // Check: count empty cells in the first few groups
+        val stride = bestCols + 1
+        var separatorCount = 0
+        var checkGroups = 0
+        var ci = bestCols // start after header
+        while (ci + 1 < cleanedCells.size && checkGroups < 5) {
+            if (cleanedCells[ci].isBlank() && ci + 1 < cleanedCells.size && cleanedCells[ci + 1].isNotBlank()) {
+                separatorCount++
+            }
+            ci += stride
+            checkGroups++
         }
-
-        if (bestCols < 2) bestCols = 4  // Fallback
+        val hasSeparators = checkGroups > 0 && separatorCount >= checkGroups / 2
+        val effectiveStride = if (hasSeparators) stride else bestCols
 
         // Group cells into rows
         val rows = mutableListOf<MutableList<String>>()
         var idx = 0
         while (idx < cleanedCells.size) {
-            val row = cleanedCells.subList(idx, (idx + bestCols).coerceAtMost(cleanedCells.size)).toMutableList()
-            // Pad row if needed
+            val end = (idx + bestCols).coerceAtMost(cleanedCells.size)
+            val row = cleanedCells.subList(idx, end).toMutableList()
             while (row.size < bestCols) row.add("")
             rows.add(row)
-            idx += bestCols
+            idx += effectiveStride
         }
 
-        if (rows.size >= 2) {
-            blocks += WordBlock.Table(rows = rows.map { r ->
+        // Split off trailing non-data rows and emit as paragraphs
+        val dataRows = mutableListOf<List<String>>()
+        val extraParagraphs = mutableListOf<String>()
+        for (row in rows) {
+            val firstCell = row.firstOrNull() ?: ""
+            // If first cell is very long (>40 chars) or looks like section text, split it out
+            if (firstCell.length > 40 || firstCell.contains("BORANG") || firstCell.contains("INVENTORI PERSONALITI")) {
+                // This row is not table data — emit all non-empty cells as paragraphs
+                for (cell in row) {
+                    if (cell.isNotBlank() && cell.length > 3) {
+                        extraParagraphs.add(cell)
+                    }
+                }
+            } else {
+                dataRows.add(row)
+            }
+        }
+
+        if (dataRows.size >= 2) {
+            blocks += WordBlock.Table(rows = dataRows.map { r ->
                 WordTableRow(
-                    isHeader = r == rows.first(),
+                    isHeader = r == dataRows.first(),
                     cells = r.map { c ->
                         WordTableCell(listOf(WordBlock.Paragraph(listOf(WordRun(c)))))
                     }
                 )
             })
+            // Emit extra content that was after the table
+            for (p in extraParagraphs) {
+                blocks += WordBlock.Paragraph(listOf(WordRun(p)))
+            }
         } else {
             // Fallback: emit as paragraphs
             for (c in cleanedCells) {

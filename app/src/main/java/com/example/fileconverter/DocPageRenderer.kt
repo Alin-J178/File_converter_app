@@ -61,14 +61,25 @@ object DocPageRenderer {
                 appendLine("Pages rendered: ${pages.size}")
                 appendLine("Page size: ${PAGE_WIDTH}x${PAGE_HEIGHT}")
                 appendLine("Block types: ${doc.blocks.groupBy { it::class.simpleName }.mapValues { it.value.size }}")
-                lines.take(30).forEachIndexed { idx, l ->
+                appendLine("--- First 15 lines ---")
+                lines.take(15).forEachIndexed { idx, l ->
                     when (l) {
                         is LayoutLine.Text -> appendLine("[$idx] TEXT(\"${l.text.take(50)}\" fs=${l.fontSize} bold=${l.isBold})")
                         is LayoutLine.TableRow -> appendLine("[$idx] TABLEROW ${l.colCount}c hdr=${l.isHeader} ${l.cells.joinToString(" | ") { it.take(20) }}")
                         is LayoutLine.Spacing -> appendLine("[$idx] SPACING ${l.height}")
-                        is LayoutLine.ImageLine -> appendLine("[$idx] IMAGE ${l.width}x${l.height}")
                         is LayoutLine.PageBreak -> appendLine("[$idx] PAGEBREAK")
                         else -> appendLine("[$idx] ${l::class.simpleName}")
+                    }
+                }
+                appendLine("--- Last 15 lines ---")
+                lines.takeLast(15).forEachIndexed { idx, l ->
+                    val realIdx = lines.size - 15 + idx
+                    when (l) {
+                        is LayoutLine.Text -> appendLine("[$realIdx] TEXT(\"${l.text.take(50)}\" fs=${l.fontSize} bold=${l.isBold})")
+                        is LayoutLine.TableRow -> appendLine("[$realIdx] TABLEROW ${l.colCount}c hdr=${l.isHeader} ${l.cells.joinToString(" | ") { it.take(20) }}")
+                        is LayoutLine.Spacing -> appendLine("[$realIdx] SPACING ${l.height}")
+                        is LayoutLine.PageBreak -> appendLine("[$realIdx] PAGEBREAK")
+                        else -> appendLine("[$realIdx] ${l::class.simpleName}")
                     }
                 }
             })
@@ -231,39 +242,95 @@ object DocPageRenderer {
                     currentY += lineHeight
                 }
                 is LayoutLine.TableRow -> {
-                    val cellHeight = 36f
-                    if (currentY + cellHeight > PAGE_HEIGHT - MARGIN_BOTTOM) {
-                        canvas = startNewPage()
-                    }
-                    val colWidth = USABLE_WIDTH.toFloat() / line.colCount.coerceAtLeast(1)
-                    val bgPaint = Paint().apply {
-                        color = if (line.isHeader) android.graphics.Color.rgb(240, 240, 240) else android.graphics.Color.TRANSPARENT
-                        style = Paint.Style.FILL
-                    }
-                    val borderPaint = Paint().apply {
-                        color = android.graphics.Color.rgb(200, 200, 200)
-                        style = Paint.Style.STROKE
-                        strokeWidth = 1f
-                    }
+                    val fontSize = if (line.isHeader) 12f else 11f
                     val textPaint = Paint().apply {
-                        textSize = 22f
+                        textSize = fontSize
                         isFakeBoldText = line.isHeader
                         color = android.graphics.Color.BLACK
                         isAntiAlias = true
                         typeface = if (line.isHeader) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                     }
+                    val lineHeight = fontSize * 1.4f
+                    val padding = 6f
 
+                    // Calculate column widths: first col (Bil.) narrow, second (Item) wide, rest medium
+                    val colWidths = FloatArray(line.colCount)
+                    val totalWeight = when (line.colCount) {
+                        4 -> floatArrayOf(1f, 5f, 1.5f, 1.5f)  // Bil, Item, Ya, Tidak
+                        else -> FloatArray(line.colCount) { 1f }
+                    }
+                    var totalW = 0f
+                    for (w in totalWeight) totalW += w
+                    for (ci in colWidths.indices) {
+                        colWidths[ci] = USABLE_WIDTH * totalWeight[ci] / totalW
+                    }
+
+                    // Calculate row height based on longest cell text
+                    var maxLines = 1
                     for ((ci, cellText) in line.cells.withIndex()) {
-                        val cellLeft = MARGIN_LEFT.toFloat() + ci * colWidth
+                        val cw = colWidths[ci]
+                        val maxTextWidth = cw - padding * 2
+                        val words = cellText.split(" ")
+                        var lineCount = 1
+                        var currentLineWidth = 0f
+                        for (word in words) {
+                            val wordWidth = textPaint.measureText(word)
+                            if (currentLineWidth + wordWidth > maxTextWidth && currentLineWidth > 0) {
+                                lineCount++
+                                currentLineWidth = wordWidth
+                            } else {
+                                currentLineWidth += wordWidth + textPaint.measureText(" ")
+                            }
+                        }
+                        maxLines = maxOf(maxLines, lineCount)
+                    }
+                    val cellHeight = (lineHeight * maxLines + padding * 2).coerceAtLeast(28f)
+
+                    if (currentY + cellHeight > PAGE_HEIGHT - MARGIN_BOTTOM) {
+                        canvas = startNewPage()
+                    }
+
+                    val bgPaint = Paint().apply {
+                        color = if (line.isHeader) android.graphics.Color.rgb(240, 240, 240) else android.graphics.Color.TRANSPARENT
+                        style = Paint.Style.FILL
+                    }
+                    val borderPaint = Paint().apply {
+                        color = android.graphics.Color.rgb(180, 180, 180)
+                        style = Paint.Style.STROKE
+                        strokeWidth = 0.5f
+                    }
+
+                    var cellX = MARGIN_LEFT.toFloat()
+                    for ((ci, cellText) in line.cells.withIndex()) {
+                        val cw = colWidths[ci]
                         val cellTop = currentY
                         // Background
-                        canvas.drawRect(cellLeft, cellTop, cellLeft + colWidth, cellTop + cellHeight, bgPaint)
+                        canvas.drawRect(cellX, cellTop, cellX + cw, cellTop + cellHeight, bgPaint)
                         // Border
-                        canvas.drawRect(cellLeft, cellTop, cellLeft + colWidth, cellTop + cellHeight, borderPaint)
-                        // Text (truncated to fit)
-                        val maxChars = (colWidth / textPaint.measureText("m")).toInt().coerceAtLeast(1)
-                        val displayText = if (cellText.length > maxChars) cellText.take(maxChars - 1) + "\u2026" else cellText
-                        canvas.drawText(displayText, cellLeft + 8f, cellTop + cellHeight - 10f, textPaint)
+                        canvas.drawRect(cellX, cellTop, cellX + cw, cellTop + cellHeight, borderPaint)
+                        // Draw wrapped text
+                        val maxTextWidth = cw - padding * 2
+                        val words = cellText.split(" ")
+                        var textY = cellTop + padding + fontSize
+                        var lineStart = StringBuilder()
+                        var lineWidth = 0f
+                        for (word in words) {
+                            val wordWidth = textPaint.measureText(word)
+                            val testWidth = if (lineStart.isEmpty()) wordWidth else lineWidth + textPaint.measureText(" ") + wordWidth
+                            if (testWidth > maxTextWidth && lineStart.isNotEmpty()) {
+                                canvas.drawText(lineStart.toString(), cellX + padding, textY, textPaint)
+                                textY += lineHeight
+                                lineStart = StringBuilder(word)
+                                lineWidth = wordWidth
+                            } else {
+                                if (lineStart.isEmpty()) lineStart.append(word) else lineStart.append(" ").append(word)
+                                lineWidth = testWidth
+                            }
+                        }
+                        if (lineStart.isNotEmpty()) {
+                            canvas.drawText(lineStart.toString(), cellX + padding, textY, textPaint)
+                        }
+                        cellX += cw
                     }
                     currentY += cellHeight
                 }
