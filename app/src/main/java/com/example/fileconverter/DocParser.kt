@@ -21,6 +21,9 @@ object DocParser {
             f.writeText(buildString {
                 appendLine("Text length: ${docText.text.length}")
                 appendLine("hasTableMarkers: ${docText.hasTableMarkers}")
+                appendLine("cellCount: ${docText.text.count { it == DocTextExtractor.CELL_MARKER }}")
+                appendLine("rowCount: ${docText.text.count { it == DocTextExtractor.ROW_MARKER }}")
+                appendLine("crCount: ${docText.text.count { it == '\r' }}")
                 appendLine("First 800 chars:")
                 appendLine(docText.text.take(800).replace("\n", "[LN]").replace("\r", "[CR]"))
             })
@@ -33,10 +36,10 @@ object DocParser {
                 appendLine("Blocks: ${blocks.size}")
                 appendLine("Tables: ${blocks.count { it is WordBlock.Table }}")
                 appendLine("Paragraphs: ${blocks.count { it is WordBlock.Paragraph }}")
-                blocks.take(15).forEachIndexed { idx, b ->
+                blocks.take(20).forEachIndexed { idx, b ->
                     when (b) {
                         is WordBlock.Table -> appendLine("[$idx] TABLE ${b.rows.size}r x ${b.rows.maxOfOrNull { it.cells.size } ?: 0}c")
-                        is WordBlock.Paragraph -> appendLine("[$idx] PARA \"${b.runs.joinToString("") { it.text }.take(60)}\"")
+                        is WordBlock.Paragraph -> appendLine("[$idx] PARA \"${b.runs.joinToString("") { it.text }.take(80)}\"")
                         else -> appendLine("[$idx] ${b::class.simpleName}")
                     }
                 }
@@ -45,86 +48,176 @@ object DocParser {
         return if (blocks.isEmpty()) WordDocument(listOf(WordBlock.Paragraph(listOf(WordRun("Empty document"))))) else WordDocument(blocks)
     }
 
+    /**
+     * Parse text that contains \u0007 (cell) markers from Word table format.
+     * Strategy: split text into pre-table paragraphs and table cells,
+     * then group cells into rows based on detected column count.
+     */
     private fun parseWithTableMarkers(raw: String, blocks: MutableList<WordBlock>) {
-        var sb = StringBuilder(); var inFieldCode = false
-        val tableRows = mutableListOf<List<String>>(); var currentRow = mutableListOf<String>(); var currentCell = StringBuilder(); var inTable = false
-        fun flushCell() { currentRow.add(currentCell.toString().trim()); currentCell = StringBuilder() }
-        fun flushRow() { flushCell(); if (currentRow.isNotEmpty()) { tableRows.add(currentRow.toList()); currentRow = mutableListOf() } }
-        fun flushParagraph() { val t = sb.toString().trim(); if (t.isNotEmpty()) blocks += WordBlock.Paragraph(listOf(WordRun(t))); sb.setLength(0) }
-        fun emitTable() {
-            if (tableRows.size >= 2 && tableRows.maxOf { it.size } >= 2) {
-                blocks += WordBlock.Table(rows = tableRows.map { r ->
-                    WordTableRow(cells = r.map { c ->
-                        WordTableCell(listOf(WordBlock.Paragraph(listOf(WordRun(c)))))
-                    })
-                })
-            } else {
-                // Too small for a real table — emit as paragraphs
-                for (r in tableRows) blocks += WordBlock.Paragraph(listOf(WordRun(r.joinToString("    "))))
+        var sb = StringBuilder()
+        var inFieldCode = false
+
+        // Phase 1: Collect pre-table paragraphs and table cells separately
+        val preTableParagraphs = mutableListOf<String>()
+        val tableCells = mutableListOf<String>()
+        var foundFirstCellMarker = false
+        var inTable = false
+
+        fun flushCellContent() {
+            val t = sb.toString().trim()
+            if (inTable) {
+                tableCells.add(t)
+            } else if (t.isNotEmpty()) {
+                preTableParagraphs.add(t)
             }
-            tableRows.clear(); currentRow.clear(); inTable = false
+            sb.setLength(0)
         }
-        var i = 0; while (i < raw.length) { val c = raw[i]; when {
-            c == '\u0013' -> inFieldCode = true
-            c == '\u0014' -> inFieldCode = false
-            c == '\u0015' -> Unit
-            inFieldCode -> Unit
-            c == DocTextExtractor.CELL_MARKER -> {
-                // Transition from non-table to table: flush sb as first cell
-                if (!inTable) {
-                    inTable = true
-                    val t = sb.toString().trim()
-                    if (t.isNotEmpty()) currentCell.append(t)
-                    sb.setLength(0)
-                }
-                flushCell()
-            }
-            c == DocTextExtractor.ROW_MARKER -> {
-                if (!inTable) inTable = true
-                flushRow()
-            }
-            c == '\r' || c == '\n' -> {
-                if (inTable) {
-                    flushCell()
-                    // \r marks end of a row in DOC tables — flush the row
-                    if (currentRow.isNotEmpty()) {
-                        tableRows.add(currentRow.toList()); currentRow = mutableListOf()
+
+        for (c in raw) {
+            when {
+                c == '\u0013' -> inFieldCode = true
+                c == '\u0014' -> inFieldCode = false
+                c == '\u0015' -> Unit
+                inFieldCode -> Unit
+                c == DocTextExtractor.CELL_MARKER -> {
+                    if (!foundFirstCellMarker) {
+                        foundFirstCellMarker = true
+                        inTable = true
+                        // Transfer any accumulated sb content
+                        val t = sb.toString().trim()
+                        if (t.isNotEmpty()) tableCells.add(t)
+                        sb.setLength(0)
+                    } else {
+                        flushCellContent()
                     }
-                    // Peek: if no more table markers follow, finalize
-                    var peek = i + 1
-                    while (peek < raw.length && (raw[peek] == '\r' || raw[peek] == '\n')) peek++
-                    if (peek >= raw.length || (raw[peek] != DocTextExtractor.CELL_MARKER && raw[peek] != DocTextExtractor.ROW_MARKER)) {
-                        emitTable()
-                    }
-                } else {
-                    flushParagraph()
                 }
+                c == DocTextExtractor.ROW_MARKER -> {
+                    if (!foundFirstCellMarker) {
+                        foundFirstCellMarker = true
+                        inTable = true
+                    }
+                    flushCellContent()
+                }
+                c == '\r' || c == '\n' -> {
+                    if (inTable) {
+                        // \r in table context: flush cell but DON'T break the table
+                        // (rows may or may not be separated by \r)
+                        flushCellContent()
+                    } else {
+                        flushCellContent()
+                    }
+                }
+                c == '\u000C' -> flushCellContent()
+                c == '\t' -> sb.append("    ")
+                c.code < 0x20 || c == '\u007F' || c == '\uFFFF' -> Unit
+                else -> sb.append(c)
             }
-            c == '\u000C' -> flushParagraph()
-            c == '\t' -> { if (inTable) currentCell.append("    ") else sb.append("    ") }
-            c.code < 0x20 || c == '\u007F' || c == '\uFFFF' -> Unit
-            else -> { if (inTable) currentCell.append(c) else sb.append(c) }
-        }; i++ }
-        if (inTable) emitTable() else flushParagraph()
+        }
+        // Flush remaining content
+        if (inTable) {
+            val t = sb.toString().trim()
+            if (t.isNotEmpty()) tableCells.add(t)
+        } else {
+            val t = sb.toString().trim()
+            if (t.isNotEmpty()) preTableParagraphs.add(t)
+        }
+
+        // Emit pre-table paragraphs
+        for (p in preTableParagraphs) {
+            blocks += WordBlock.Paragraph(listOf(WordRun(p)))
+        }
+
+        // Phase 2: Group table cells into rows
+        if (tableCells.size < 4) {
+            // Not enough cells for a table — emit as paragraphs
+            for (c in tableCells) {
+                if (c.isNotBlank()) blocks += WordBlock.Paragraph(listOf(WordRun(c)))
+            }
+            return
+        }
+
+        // Filter out truly empty cells that are likely row separators
+        // Keep single-space cells (they're checkbox values)
+        // But remove cells that are completely empty AND surrounded by other empties
+        val cleanedCells = mutableListOf<String>()
+        for (cell in tableCells) {
+            cleanedCells.add(cell)
+        }
+
+        // Detect column count by analyzing the cell pattern
+        // The first few cells form the header, which typically has the right count
+        // Try common column counts and pick the one that gives the best row alignment
+        var bestCols = 0
+        var bestScore = -1
+
+        for (tryCols in 2..10) {
+            if (cleanedCells.size < tryCols * 2) continue
+
+            // Check how well the cells align into rows of tryCols
+            // The "extra" empty cells between rows should be consistent
+            val rowCount = cleanedCells.size / tryCols
+            val remainder = cleanedCells.size % tryCols
+
+            // Score: more complete rows is better, fewer remainder cells is better
+            val score = rowCount * 100 - remainder
+
+            if (score > bestScore) {
+                bestScore = score
+                bestCols = tryCols
+            }
+        }
+
+        // Also try: detect from the header pattern
+        // Count cells before the first empty cell
+        val headerEnd = cleanedCells.indexOfFirst { it.isBlank() }.coerceAtLeast(4)
+        if (headerEnd in 2..10 && headerEnd > bestCols) {
+            bestCols = headerEnd
+        }
+
+        if (bestCols < 2) bestCols = 4  // Fallback
+
+        // Group cells into rows
+        val rows = mutableListOf<MutableList<String>>()
+        var idx = 0
+        while (idx < cleanedCells.size) {
+            val row = cleanedCells.subList(idx, (idx + bestCols).coerceAtMost(cleanedCells.size)).toMutableList()
+            // Pad row if needed
+            while (row.size < bestCols) row.add("")
+            rows.add(row)
+            idx += bestCols
+        }
+
+        if (rows.size >= 2) {
+            blocks += WordBlock.Table(rows = rows.map { r ->
+                WordTableRow(
+                    isHeader = r == rows.first(),
+                    cells = r.map { c ->
+                        WordTableCell(listOf(WordBlock.Paragraph(listOf(WordRun(c)))))
+                    }
+                )
+            })
+        } else {
+            // Fallback: emit as paragraphs
+            for (c in cleanedCells) {
+                if (c.isNotBlank()) blocks += WordBlock.Paragraph(listOf(WordRun(c)))
+            }
+        }
     }
 
     private fun parseAsParagraphs(raw: String, blocks: MutableList<WordBlock>) {
         // Split into groups separated by blank lines (consecutive CR/LF)
-        // This preserves paragraph structure for proper table detection
         data class TextGroup(val lines: MutableList<String> = mutableListOf())
         val groups = mutableListOf<TextGroup>()
         val current = StringBuilder()
         var inFieldCode = false
-        var blankRun = 0 // count consecutive blank lines
+        var blankRun = 0
 
         fun flushParagraph() {
             val t = current.toString().trim()
             if (t.isNotEmpty()) {
-                if (blankRun > 0 && groups.isNotEmpty()) groups.add(TextGroup()) // new group after blanks
+                if (blankRun > 0 && groups.isNotEmpty()) groups.add(TextGroup())
                 if (groups.isEmpty()) groups.add(TextGroup())
                 groups.last().lines.add(t)
-            } else if (blankRun == 0 && groups.isNotEmpty()) {
-                // Empty content but no blank run yet — still same group
             }
             current.setLength(0)
         }
@@ -144,22 +237,16 @@ object DocParser {
         } }
         flushParagraph()
 
-        // Now process each group independently
         for (group in groups) {
             val lines = group.lines
             if (lines.isEmpty()) continue
-
             if (lines.size == 1) {
                 blocks += WordBlock.Paragraph(listOf(WordRun(lines[0])))
                 continue
             }
-
-            // Try table detection WITHIN this group only
-            // Pass 1: Split by tabs / 2+ spaces
-            val pass1Rows = lines.map { it.split(Regex("\\t|\\s{2,}")).filter { c -> c.isNotBlank() } }
+            val pass1Rows = lines.map { it.split(Regex("\t|\u0007|\\s{2,}")).filter { c -> c.isNotBlank() } }
             val pass1ColCounts = pass1Rows.map { it.size }
             val pass1Mode = pass1ColCounts.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: 1
-
             if (pass1Mode >= 2 && lines.size >= 2) {
                 val tableRows = pass1Rows.filter { it.size in 2..(pass1Mode + 2) }
                 if (tableRows.size >= 2) {
@@ -173,8 +260,6 @@ object DocParser {
                     continue
                 }
             }
-
-            // No table detected — render as paragraphs
             for (line in lines) {
                 blocks += WordBlock.Paragraph(listOf(WordRun(line)))
             }

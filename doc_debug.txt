@@ -2,9 +2,9 @@ Text length: 33248
 hasTableMarkers: true
 First 800 chars:
 [CR][CR][CR]INVENTORI PERSONALITI SIDEK[CR]Sidek’s Personality Inventory[CR]IPS[CR][CR][CR][CR]IPS[CR][CR][CR][CR][CR][CR][CR]Oleh:[CR][CR]DR. SIDEK MOHD NOAH, Ph.D[CR][CR][CR][CR][CR]INVENTORI PERSONALITI SIDEK[CR]Sidek’s Personality Inventory[CR]IPS[CR][CR]Arahan:[CR][CR]Inventori ini mengandungi 160 item atau pernyataan. Bermula dengan nombor satu, rekodkan jawapan anda pada borang jawapan yang disediakan.[CR][CR]Jika pernyataan itu menerangkan diri anda, tandakan pada ‘Ya’ dan jika tidak menerangkan diri anda, tandakan pada ‘Tidak” pada borang jawapan yang disediakan.[CR][CR]Jika anda menghadapi kesukaran untuk menentukan sama ada sesuatu pernyataan itu menerangkan diri anda ataupun tidak, pilih jawapan yang anda rasa paling selesa. JAWAB SEMUA ITEM. [CR][CR][CR][CR]Bil.ItemYaTidak1Selesa memberitahu kawan-kawan mengenai apa-apa sahaja yang ada dalam fikiran saya.  2Lebih suka bekerj
-Blocks: 15
+Blocks: 514
 Tables: 0
-Paragraphs: 15
+Paragraphs: 514
 [0] PARA "INVENTORI PERSONALITI SIDEK"
 [1] PARA "Sidek’s Personality Inventory"
 [2] PARA "IPS"
@@ -18,14 +18,14 @@ Paragraphs: 15
 [10] PARA "Inventori ini mengandungi 160 item atau pernyataan. Bermula "
 [11] PARA "Jika pernyataan itu menerangkan diri anda, tandakan pada ‘Ya"
 [12] PARA "Jika anda menghadapi kesukaran untuk menentukan sama ada ses"
-[13] PARA "Bil."
-[14] PARA "    Item    Ya    Tidak        1    Selesa memberitahu kawan"
+[13] PARA "Bil.    Item    Ya    Tidak        1    Selesa memberitahu k"
+[14] PARA "BORANG JAWAPAN"
 
 === PAGE RENDERER ===
-Layout lines: 200
-Pages rendered: 5
+Layout lines: 1138
+Pages rendered: 11
 Page size: 1080x1527
-Block types: {Paragraph=15}
+Block types: {Paragraph=514}
 [0] TEXT("INVENTORI PERSONALITI SIDEK" fs=12.0 bold=false)
 [1] SPACING 8.0
 [2] TEXT("Sidek’s Personality Inventory" fs=12.0 bold=false)
@@ -51,8 +51,8 @@ Block types: {Paragraph=15}
 [22] TEXT("Jika pernyataan itu menerangkan diri anda, tandaka" fs=12.0 bold=false)
 [23] SPACING 8.0
 [24] TEXT("Jika anda menghadapi kesukaran untuk menentukan sa" fs=12.0 bold=false)
-[25] TEXT("SEMUA ITEM." fs=12.0 bold=false)
+[25] TEXT("JAWAB SEMUA ITEM." fs=12.0 bold=false)
 [26] SPACING 8.0
-[27] TEXT("Bil." fs=12.0 bold=false)
-[28] SPACING 8.0
-[29] TEXT("Item Ya Tidak 1 Selesa memberitahu kawan-kawan men" fs=12.0 bold=false)
+[27] TEXT("Bil. Item Ya Tidak 1 Selesa memberitahu kawan-kawa" fs=12.0 bold=false)
+[28] TEXT("dan benda. 3 Suka melakukan sesuatu mengikut cara " fs=12.0 bold=false)
+[29] TEXT("berada di samping saya. 5 Suka menghadiri majlis-m" fs=12.0 bold=false)
