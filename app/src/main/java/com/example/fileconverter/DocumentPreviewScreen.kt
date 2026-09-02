@@ -92,34 +92,221 @@ object MarkdownParser {
 }
 
 object RtfParser {
-    fun parse(ctx: android.content.Context, uri: Uri): TextDocument {
-        val i = ctx.contentResolver.openInputStream(uri) ?: return TextDocument(emptyList())
-        val t = i.use { it.bufferedReader().readText() }
-        val c = t.replace(Regex("""\{\\rtf1[^}]*\}"""), "")
-            .replace(Regex("""\\'[0-9a-fA-F]{2}"""), "")
-            .replace(Regex("""\\u\d+;?"""), "")
-            .replace(Regex("""\\\w+\s?"""), "")
-            .replace(Regex("""\{[^}]*\}"""), "")
-            .replace("\\", "").replace("\r\n", "\n").replace("\r", "\n").trim()
-        return if (c.isEmpty()) TextDocument(listOf(TextBlock("Empty RTF")))
-        else TextDocument(c.chunked(2000).map { TextBlock(it) })
+    fun parse(ctx: android.content.Context, uri: Uri): WordDocument {
+        val input = ctx.contentResolver.openInputStream(uri) ?: return WordDocument(emptyList())
+        val raw = input.use { it.bufferedReader().readText() }
+        if (raw.isBlank()) return WordDocument(listOf(WordBlock.Paragraph(listOf(WordRun("Empty RTF")))))
+        val blocks = mutableListOf<WordBlock>()
+        var bold = false; var italic = false; var underline = false
+        var inTable = false
+        val tableRows = mutableListOf<WordTableRow>()
+        var currentRow = mutableListOf<WordTableCell>()
+        var currentCell = mutableListOf<WordBlock>()
+        var cellSb = StringBuilder()
+        val sb = StringBuilder()
+        var idx = 0
+        while (idx < raw.length) {
+            val c = raw[idx]
+            when {
+                c == '\\' -> {
+                    val cmdStart = idx + 1
+                    if (cmdStart >= raw.length) break
+                    val cmdChar = raw[cmdStart]
+                    when {
+                        cmdChar == 'b' && (cmdStart + 1 >= raw.length || !raw[cmdStart + 1].isLetter()) -> {
+                            if (cmdStart + 1 < raw.length && raw[cmdStart + 1] == '0') { bold = false; idx = cmdStart + 2 } else { bold = true; idx = cmdStart + 1 }
+                        }
+                        cmdChar == 'i' && (cmdStart + 1 >= raw.length || !raw[cmdStart + 1].isLetter()) -> {
+                            if (cmdStart + 1 < raw.length && raw[cmdStart + 1] == '0') { italic = false; idx = cmdStart + 2 } else { italic = true; idx = cmdStart + 1 }
+                        }
+                        cmdChar == 'u' && (cmdStart + 1 < raw.length && raw[cmdStart + 1].isDigit()) -> {
+                            val numEnd = (cmdStart + 1 until raw.length).firstOrNull { !raw[it].isDigit() } ?: raw.length
+                            val code = raw.substring(cmdStart + 1, numEnd).toIntOrNull() ?: 0
+                            sb.append(if (code in 0x20..0x10FFFF) code.toChar() else '?')
+                            idx = if (numEnd < raw.length && raw[numEnd] == ';') numEnd + 1 else numEnd
+                        }
+                        raw.startsWith("\\tab", cmdStart - 1) -> { sb.append('\t'); idx = cmdStart + 3 }
+                        raw.startsWith("\\par", cmdStart - 1) || raw.startsWith("\\pard", cmdStart - 1) -> {
+                            val txt = sb.toString().trim()
+                            if (inTable) {
+                                if (txt.isNotEmpty()) cellSb.appendLine(txt)
+                                if (cellSb.isNotEmpty()) currentCell += WordBlock.Paragraph(listOf(WordRun(cellSb.toString().trim())))
+                                cellSb = StringBuilder(); flushRtfCell(currentRow, currentCell); currentCell = mutableListOf()
+                            } else { if (txt.isNotEmpty()) blocks += WordBlock.Paragraph(listOf(WordRun(txt))); sb.setLength(0) }
+                            idx = cmdStart + if (raw.startsWith("\\pard", cmdStart - 1)) 4 else 3
+                        }
+                        raw.startsWith("\\cell", cmdStart - 1) && inTable -> {
+                            val txt = sb.toString().trim(); sb.setLength(0)
+                            if (txt.isNotEmpty()) cellSb.append(txt)
+                            if (cellSb.isNotEmpty()) currentCell += WordBlock.Paragraph(listOf(WordRun(cellSb.toString().trim())))
+                            cellSb = StringBuilder(); flushRtfCell(currentRow, currentCell); currentCell = mutableListOf()
+                            idx = cmdStart + 4
+                        }
+                        raw.startsWith("\\row", cmdStart - 1) && inTable -> {
+                            val txt = sb.toString().trim(); sb.setLength(0)
+                            if (txt.isNotEmpty()) cellSb.append(txt)
+                            if (cellSb.isNotEmpty()) currentCell += WordBlock.Paragraph(listOf(WordRun(cellSb.toString().trim())))
+                            cellSb = StringBuilder(); flushRtfCell(currentRow, currentCell); currentCell = mutableListOf()
+                            if (currentRow.isNotEmpty()) { tableRows += WordTableRow(currentRow.toList()); currentRow = mutableListOf() }
+                            idx = cmdStart + 3
+                        }
+                        raw.startsWith("\\trowd", cmdStart - 1) -> { inTable = true; idx = cmdStart + 5 }
+                        else -> {
+                            val end = raw.indexOfAny(charArrayOf(' ', '\\', '{', '}', '\r', '\n'), cmdStart)
+                            val cmd = if (end < 0) raw.substring(cmdStart) else raw.substring(cmdStart, end)
+                            val numParam = cmd.all { it.isDigit() || it == '-' }
+                            idx = if (end < 0) raw.length else end
+                            if (cmd == "plain") { bold = false; italic = false; underline = false }
+                            else if (numParam && cmd.isNotEmpty() && cmd[0].isDigit()) { /* number parameter consumed */ }
+                        }
+                    }
+                }
+                c == '{' -> { idx++; }
+                c == '}' -> { idx++; }
+                c == '\r' || c == '\n' -> { idx++; }
+                else -> { sb.append(c); idx++; }
+            }
+        }
+        if (inTable) { if (currentRow.isNotEmpty()) tableRows += WordTableRow(currentRow.toList()) }
+        if (tableRows.size >= 2) {
+            val maxCols = tableRows.maxOf { it.cells.size }
+            if (maxCols >= 2) blocks += WordBlock.Table(tableRows)
+        }
+        val txt = sb.toString().trim()
+        if (txt.isNotEmpty() && !inTable) blocks += WordBlock.Paragraph(listOf(WordRun(txt)))
+        if (blocks.isEmpty()) blocks += WordBlock.Paragraph(listOf(WordRun("Empty RTF")))
+        return WordDocument(blocks)
+    }
+
+    private fun flushRtfCell(row: MutableList<WordTableCell>, cell: MutableList<WordBlock>) {
+        if (cell.isEmpty()) cell += WordBlock.Paragraph(emptyList())
+        row += WordTableCell(cell.toList())
     }
 }
 
 object HtmlParser {
     fun parse(ctx: android.content.Context, uri: Uri): WordDocument {
-        val i = ctx.contentResolver.openInputStream(uri) ?: return WordDocument(emptyList())
-        val h = i.use { it.bufferedReader().readText() }
-        val p = h.replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("""</p>""", RegexOption.IGNORE_CASE), "\n\n")
-            .replace(Regex("""</div>""", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("""</h[1-6]>""", RegexOption.IGNORE_CASE), "\n\n")
-            .replace(Regex("""</li>""", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("""<[^>]+>"""), "")
-            .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ")
-            .replace(Regex("""\n{3,}"""), "\n\n").trim()
-        return if (p.isEmpty()) WordDocument(listOf(WordBlock.Paragraph(listOf(WordRun("Empty HTML")))))
-        else WordDocument(p.lines().chunked(50).map { WordBlock.Paragraph(listOf(WordRun(it.joinToString("\n")))) })
+        val input = ctx.contentResolver.openInputStream(uri) ?: return WordDocument(emptyList())
+        val html = input.use { it.bufferedReader().readText() }
+        if (html.isBlank()) return WordDocument(listOf(WordBlock.Paragraph(listOf(WordRun("Empty HTML")))))
+        val blocks = mutableListOf<WordBlock>()
+        var pos = 0
+        while (pos < html.length) {
+            val lt = html.indexOf('<', pos)
+            if (lt < 0) { val rest = decodeEntities(html.substring(pos).trim()); if (rest.isNotEmpty()) blocks += WordBlock.Paragraph(listOf(WordRun(rest))); break }
+            if (lt > pos) { val txt = decodeEntities(html.substring(pos, lt).trim()); if (txt.isNotEmpty()) blocks += WordBlock.Paragraph(listOf(WordRun(txt))) }
+            val gt = html.indexOf('>', lt)
+            if (gt < 0) break
+            val tagText = html.substring(lt, gt + 1)
+            val tagInfo = Regex("""</?([a-zA-Z]+)""").find(tagText) ?: run { pos = gt + 1; continue }
+            val tagName = tagInfo.groupValues[1].lowercase()
+            val closing = tagText.startsWith("</")
+            pos = gt + 1
+            when (tagName) {
+                "h1", "h2", "h3", "h4", "h5", "h6" -> {
+                    if (closing) continue
+                    val endTag = "</$tagName>"; val end = html.indexOf(endTag, pos, true)
+                    val content = if (end < 0) html.substring(pos) else html.substring(pos, end)
+                    val runs = extractInlineHtml(decodeEntities(content.trim()))
+                    val level = tagName.last().digitToInt()
+                    blocks += WordBlock.Heading(runs, level)
+                    if (end >= 0) pos = end + endTag.length
+                }
+                "p" -> {
+                    if (closing) continue
+                    val end = findHtmlEnd(html, pos, "p")
+                    val runs = extractInlineHtml(decodeEntities(html.substring(pos, end).trim()))
+                    if (runs.isNotEmpty()) blocks += WordBlock.Paragraph(runs)
+                    pos = end
+                }
+                "table" -> {
+                    if (closing) continue
+                    val end = findHtmlEnd(html, pos, "table")
+                    parseHtmlTable(html.substring(pos, end), blocks)
+                    pos = end
+                }
+                "br" -> { /* handled inside runs */ }
+                "img" -> { /* skip images in HTML preview */ }
+                else -> { /* skip unknown tags */ }
+            }
+        }
+        if (blocks.isEmpty()) blocks += WordBlock.Paragraph(listOf(WordRun("Empty HTML")))
+        return WordDocument(blocks)
+    }
+
+    private fun parseHtmlTable(tableHtml: String, blocks: MutableList<WordBlock>) {
+        val rows = mutableListOf<WordTableRow>()
+        val rowRe = Regex("""<tr\b[^>]*>(.*?)</tr>""", RegexOption.DOT_MATCHES_ALL)
+        for (rm in rowRe.findAll(tableHtml)) {
+            val rowHtml = rm.groupValues[1]
+            val cells = mutableListOf<WordTableCell>()
+            val cellRe = Regex("""<t[hd]\b[^>]*>(.*?)</t[hd]>""", RegexOption.DOT_MATCHES_ALL)
+            for (cm in cellRe.findAll(rowHtml)) {
+                val cellContent = cm.value
+                val isHeader = cellContent.startsWith("<th", ignoreCase = true)
+                val runs = extractInlineHtml(decodeEntities(stripOuterTags(cm.groupValues[1]).trim()))
+                cells += WordTableCell(listOf(WordBlock.Paragraph(runs)))
+            }
+            if (cells.isNotEmpty()) rows += WordTableRow(cells, isHeader = rows.isEmpty())
+        }
+        if (rows.size >= 2 || (rows.size == 1 && rows[0].cells.size >= 2)) {
+            blocks += WordBlock.Table(rows)
+        }
+    }
+
+    private fun extractInlineHtml(text: String): List<WordRun> {
+        if (text.isBlank()) return emptyList()
+        val runs = mutableListOf<WordRun>()
+        var bold = false; var italic = false; var underline = false
+        val sb = StringBuilder()
+        var pos = 0
+        while (pos < text.length) {
+            val lt = text.indexOf('<', pos)
+            if (lt < 0) { sb.append(text.substring(pos)); break }
+            if (lt > pos) sb.append(text.substring(pos, lt))
+            val gt = text.indexOf('>', lt)
+            if (gt < 0) { sb.append(text.substring(lt)); break }
+            val tagText = text.substring(lt, gt + 1)
+            pos = gt + 1
+            val tag = Regex("""</?([a-zA-Z]+)""").find(tagText) ?: continue
+            val name = tag.groupValues[1].lowercase()
+            val closing = tagText.startsWith("</")
+            when (name) {
+                "b", "strong" -> { if (closing) bold = false else { if (sb.isNotEmpty()) { runs += WordRun(sb.toString(), bold, italic, underline); sb.setLength(0) }; bold = true } }
+                "i", "em" -> { if (closing) italic = false else { if (sb.isNotEmpty()) { runs += WordRun(sb.toString(), bold, italic, underline); sb.setLength(0) }; italic = true } }
+                "u" -> { if (closing) underline = false else { if (sb.isNotEmpty()) { runs += WordRun(sb.toString(), bold, italic, underline); sb.setLength(0) }; underline = true } }
+                "br" -> sb.append('\n')
+                "img" -> {
+                    val alt = Regex("""alt="([^"]*)"""", RegexOption.IGNORE_CASE).find(tagText)?.groupValues?.get(1) ?: ""
+                    if (alt.isNotEmpty()) sb.append("[Image: $alt]")
+                }
+                else -> { /* ignore other inline tags */ }
+            }
+        }
+        if (sb.isNotEmpty()) runs += WordRun(sb.toString(), bold, italic, underline)
+        return runs
+    }
+
+    private fun decodeEntities(text: String): String = text
+        .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+        .replace("&nbsp;", " ").replace("&quot;", "\"").replace("&#39;", "'")
+        .replace(Regex("""&#(\d+);""")) { it.groupValues[1].toIntOrNull()?.toChar()?.toString() ?: "" }
+        .replace(Regex("""&#x([0-9a-fA-F]+);""")) { it.groupValues[1].toIntOrNull(16)?.toChar()?.toString() ?: "" }
+
+    private fun stripOuterTags(text: String): String = Regex("""<[^>]+>""").replace(text, "")
+
+    private fun findHtmlEnd(html: String, start: Int, tag: String): Int {
+        val close = "</$tag>"
+        var depth = 1; var i = start
+        while (i < html.length) {
+            val open = Regex("""<$tag\b[^>]*>""", RegexOption.IGNORE_CASE).find(html, i)
+            val cl = html.indexOf(close, i, ignoreCase = true)
+            val oi = open?.range?.first ?: Int.MAX_VALUE
+            if (open != null && oi < cl) { depth++; i = open.range.last + 1 }
+            else if (cl >= 0) { depth--; if (depth == 0) return cl + close.length; i = cl + close.length }
+            else return html.length
+        }
+        return html.length
     }
 }
 
@@ -365,7 +552,7 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
                     ext == "ppt" || mt.contains("powerpoint") -> doc = ParsedDocument.Word(DocParser.parseLegacyPpt(ctx, uri))
                     ext == "csv" || mt.contains("csv") -> doc = ParsedDocument.Spreadsheet(CsvParser.parse(ctx, uri))
                     ext == "odt" || mt.contains("opendocument.text") -> doc = ParsedDocument.Word(OdtParser.parse(ctx, uri))
-                    ext == "rtf" -> doc = ParsedDocument.Text(RtfParser.parse(ctx, uri))
+                    ext == "rtf" -> doc = ParsedDocument.Word(RtfParser.parse(ctx, uri))
                     ext == "txt" || ext == "text" || mt.contains("text/plain") -> doc = ParsedDocument.Text(PlainTextParser.parse(ctx, uri))
                     ext == "md" || ext == "markdown" -> doc = ParsedDocument.Text(MarkdownParser.parse(ctx, uri))
                     ext == "html" || ext == "htm" || mt.contains("html") -> doc = ParsedDocument.Word(HtmlParser.parse(ctx, uri))

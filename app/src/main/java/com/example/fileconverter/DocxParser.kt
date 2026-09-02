@@ -55,21 +55,21 @@ object DocxParser {
             val m = TAG_RE.find(xml, lt); if (m == null) { pos = lt + 1; continue }
             val closing = m.groupValues[1].isNotEmpty(); val ns = m.groupValues[2]; val name = m.groupValues[3]
             if (!closing && ns == "w") { when (name) {
-                "p" -> { val end = findEnd(xml, lt, "w:p"); splitParagraphWithDrawings(xml.substring(lt, end), chartRels, media, blocks); pos = end; continue }
+                "p" -> { val end = findEnd(xml, lt, "w:p"); splitParagraphWithDrawings(xml.substring(lt, end), imageRels, chartRels, media, blocks); pos = end; continue }
                 "tbl" -> { val end = findNestedEnd(xml, lt, "w:tbl"); blocks += parseTable(xml.substring(lt, end)); pos = end; continue }
-                "drawing" -> { val end = findEnd(xml, lt, "w:drawing"); blocks += parseDrawing(xml.substring(lt, end), chartRels, media); pos = end; continue }
+                "drawing" -> { val end = findEnd(xml, lt, "w:drawing"); blocks += parseDrawing(xml.substring(lt, end), imageRels, chartRels, media); pos = end; continue }
                 "sectPr" -> { pos = findEnd(xml, lt, "w:sectPr"); continue }
             } }
             val gt = xml.indexOf('>', lt); pos = if (gt < 0) xml.length else gt + 1
         }
     }
 
-    private fun splitParagraphWithDrawings(xml: String, chartRels: Map<String, String>, media: Map<String, ByteArray>, blocks: MutableList<WordBlock>) {
+    private fun splitParagraphWithDrawings(xml: String, imageRels: Map<String, String>, chartRels: Map<String, String>, media: Map<String, ByteArray>, blocks: MutableList<WordBlock>) {
         val drawings = mutableListOf<Pair<Int, Int>>(); var search = 0
         while (true) { val d = Regex("""<w:drawing(\s[^>]*)?>""").find(xml, search) ?: break; val dEnd = findEnd(xml, d.range.first, "w:drawing"); drawings += d.range.first to dEnd; search = dEnd }
         if (drawings.isEmpty()) { blocks += WordBlock.Paragraph(parseRuns(xml)); return }
         var textStart = 0
-        for ((ds, de) in drawings) { addParagraphFragment(xml.substring(textStart, ds), blocks); blocks += parseDrawing(xml.substring(ds, de), chartRels, media); textStart = de }
+        for ((ds, de) in drawings) { addParagraphFragment(xml.substring(textStart, ds), blocks); blocks += parseDrawing(xml.substring(ds, de), imageRels, chartRels, media); textStart = de }
         addParagraphFragment(xml.substring(textStart), blocks)
     }
 
@@ -157,13 +157,13 @@ object DocxParser {
 
     // ---- Drawing / Image / Chart ----
 
-    fun parseDrawing(xml: String, chartRels: Map<String, String>, media: Map<String, ByteArray>): WordBlock {
+    fun parseDrawing(xml: String, imageRels: Map<String, String>, chartRels: Map<String, String>, media: Map<String, ByteArray>): WordBlock {
         val chartRid = Regex("""r:id="([^"]+)"""").find(xml)?.groupValues?.get(1)
         if (chartRid != null && chartRels.containsKey(chartRid)) { val chartPath = chartRels[chartRid]!!; val chartXml = media[chartPath]?.let { String(it, Charsets.UTF_8) }
             if (chartXml != null) { val extent = Regex("""<wp:extent\s+cx="(\d+)"\s+cy="(\d+)" """).find(xml); val h = extent?.let { it.groupValues[2].toFloat() / 914400f * 72f } ?: 240f
                 return parseChart(chartXml, minOf(maxOf(h, 120f), 360f)) } }
         val blipRid = Regex("""r:embed="([^"]+)"""").find(xml)?.groupValues?.get(1)
-        if (blipRid != null) { val mediaPath = media.keys.find { it.contains("media") }; val imgBytes = mediaPath?.let { media[it] }
+        if (blipRid != null) { val mediaPath = imageRels[blipRid]; val imgBytes = mediaPath?.let { media[it] }
             if (imgBytes != null) { val extent = Regex("""<wp:extent\s+cx="(\d+)"\s+cy="(\d+)" """).find(xml)
                 val w = extent?.let { (it.groupValues[1].toFloat() / 914400f * 72f).toInt() } ?: 200
                 val h = extent?.let { (it.groupValues[2].toFloat() / 914400f * 72f).toInt() } ?: 200
