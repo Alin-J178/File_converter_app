@@ -579,21 +579,33 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
                 android.util.Log.e("DOC_DEBUG", "Opening file: ext=$ext, mime=$mt")
                 when {
                     ext == "pdf" || mt.contains("pdf") -> bmps = renderPdfPages(ctx, uri)
-                    ext == "docx" || mt.contains("wordprocessingml") -> doc = ParsedDocument.Word(DocxParser.parse(ctx, uri))
+                    ext == "docx" || mt.contains("wordprocessingml") -> {
+                        val wordDoc = DocxParser.parse(ctx, uri)
+                        bmps = DocPageRenderer.render(wordDoc)
+                    }
                     ext == "doc" || mt.contains("msword") -> {
-                        android.util.Log.e("DOC_DEBUG", "Using DocParser for .doc file")
-                        doc = ParsedDocument.Word(DocParser.parse(ctx, uri))
+                        val wordDoc = DocParser.parse(ctx, uri)
+                        bmps = DocPageRenderer.render(wordDoc)
                     }
                     ext == "xlsx" || mt.contains("spreadsheetml") -> doc = ParsedDocument.Spreadsheet(XlsxParser.parse(ctx, uri))
                     ext == "xls" -> doc = ParsedDocument.Text(TextDocument(listOf(TextBlock("[XLS not supported]"))))
                     ext == "pptx" || mt.contains("presentationml") -> doc = ParsedDocument.Presentation(PptxParser.parse(ctx, uri))
                     ext == "ppt" || mt.contains("powerpoint") -> doc = ParsedDocument.Word(DocParser.parseLegacyPpt(ctx, uri))
                     ext == "csv" || mt.contains("csv") -> doc = ParsedDocument.Spreadsheet(CsvParser.parse(ctx, uri))
-                    ext == "odt" || mt.contains("opendocument.text") -> doc = ParsedDocument.Word(OdtParser.parse(ctx, uri))
-                    ext == "rtf" -> doc = ParsedDocument.Word(RtfParser.parse(ctx, uri))
+                    ext == "odt" || mt.contains("opendocument.text") -> {
+                        val wordDoc = OdtParser.parse(ctx, uri)
+                        bmps = DocPageRenderer.render(wordDoc)
+                    }
+                    ext == "rtf" -> {
+                        val wordDoc = RtfParser.parse(ctx, uri)
+                        bmps = DocPageRenderer.render(wordDoc)
+                    }
                     ext == "txt" || ext == "text" || mt.contains("text/plain") -> doc = ParsedDocument.Text(PlainTextParser.parse(ctx, uri))
                     ext == "md" || ext == "markdown" -> doc = ParsedDocument.Text(MarkdownParser.parse(ctx, uri))
-                    ext == "html" || ext == "htm" || mt.contains("html") -> doc = ParsedDocument.Word(HtmlParser.parse(ctx, uri))
+                    ext == "html" || ext == "htm" || mt.contains("html") -> {
+                        val wordDoc = HtmlParser.parse(ctx, uri)
+                        bmps = DocPageRenderer.render(wordDoc)
+                    }
                     else -> doc = ParsedDocument.Text(TextDocument(listOf(TextBlock("Preview not available for .$ext"))))
                 }
                 if (doc == null && bmps.isEmpty()) err = "Could not read file content"
