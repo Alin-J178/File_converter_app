@@ -354,32 +354,66 @@ private fun renderPdfPages(ctx: android.content.Context, uri: Uri): List<Bitmap>
 @Composable
 private fun renderWordTable(table: WordBlock.Table, colors: AppColors, ac: Color) {
     if (table.rows.isEmpty()) return
-    val bd = Color(0xFFBDBDBD)
-    val hb = ac.copy(alpha = 0.12f)
-    Column(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+    val borderColor = colors.onBackground.copy(alpha = 0.15f)
+    val hb = ac.copy(alpha = 0.10f)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(vertical = 8.dp)
+    ) {
         for ((ri, row) in table.rows.withIndex()) {
             val bg = when {
-                row.isHeader -> hb
-                ri % 2 == 1 -> Color(0xFFF5F5F5)
-                else -> Color.Transparent
+                ri == 0 -> hb  // first row as header
+                ri % 2 == 1 -> colors.onBackground.copy(alpha = 0.04f)
+                else -> colors.background
             }
             Row(modifier = Modifier.background(bg).height(IntrinsicSize.Min)) {
-                for (cell in row.cells) {
-                    for (s in 1..cell.gridSpan) {
-                        val cbg = if (cell.background != 0) Color(cell.background).copy(alpha = 0.15f) else Color.Transparent
-                        Column(modifier = Modifier.weight(1f, fill = false).defaultMinSize(minWidth = 60.dp).background(cbg).padding(horizontal = 6.dp, vertical = 4.dp)) {
-                            for (b in cell.blocks) {
-                                if (b is WordBlock.Paragraph) {
-                                    val tx = buildAnnotatedString {
-                                        for (r in b.runs) withStyle(SpanStyle(fontWeight = if (r.bold || row.isHeader) FontWeight.Bold else FontWeight.Normal, fontSize = 10.sp, color = colors.onBackground)) { append(r.text) }
-                                    }
-                                    if (tx.isNotBlank()) Text(tx, fontSize = 10.sp, lineHeight = 14.sp, maxLines = 10, overflow = TextOverflow.Ellipsis)
+                for ((ci, cell) in row.cells.withIndex()) {
+                    val cellBg = if (cell.background != 0) Color(cell.background).copy(alpha = 0.15f) else Color.Transparent
+                    Column(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .defaultMinSize(minWidth = 60.dp)
+                            .background(cellBg)
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                    ) {
+                        for (b in cell.blocks) {
+                            if (b is WordBlock.Paragraph) {
+                                val tx = buildAnnotatedString {
+                                    for (r in b.runs) withStyle(
+                                        SpanStyle(
+                                            fontWeight = if (r.bold || ri == 0) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 11.sp,
+                                            color = colors.onBackground
+                                        )
+                                    ) { append(r.text) }
                                 }
+                                if (tx.isNotBlank()) Text(
+                                    tx, fontSize = 11.sp, lineHeight = 16.sp,
+                                    maxLines = 15, overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
+                    // Cell right border
+                    if (ci < row.cells.size - 1) {
+                        Box(
+                            modifier = Modifier
+                                .width(0.5.dp)
+                                .fillMaxSize()
+                                .background(borderColor)
+                        )
+                    }
                 }
             }
+            // Row bottom border
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(borderColor)
+            )
         }
     }
 }
@@ -542,10 +576,14 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
         loading = true; err = null; doc = null; bmps = emptyList()
         withContext(Dispatchers.IO) {
             try {
+                android.util.Log.e("DOC_DEBUG", "Opening file: ext=$ext, mime=$mt")
                 when {
                     ext == "pdf" || mt.contains("pdf") -> bmps = renderPdfPages(ctx, uri)
                     ext == "docx" || mt.contains("wordprocessingml") -> doc = ParsedDocument.Word(DocxParser.parse(ctx, uri))
-                    ext == "doc" || mt.contains("msword") -> doc = ParsedDocument.Word(DocParser.parse(ctx, uri))
+                    ext == "doc" || mt.contains("msword") -> {
+                        android.util.Log.e("DOC_DEBUG", "Using DocParser for .doc file")
+                        doc = ParsedDocument.Word(DocParser.parse(ctx, uri))
+                    }
                     ext == "xlsx" || mt.contains("spreadsheetml") -> doc = ParsedDocument.Spreadsheet(XlsxParser.parse(ctx, uri))
                     ext == "xls" -> doc = ParsedDocument.Text(TextDocument(listOf(TextBlock("[XLS not supported]"))))
                     ext == "pptx" || mt.contains("presentationml") -> doc = ParsedDocument.Presentation(PptxParser.parse(ctx, uri))
@@ -643,7 +681,7 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
                         doc != null -> {
                             val ls = rememberLazyListState()
                             LazyColumn(
-                                state = ls, modifier = Modifier.fillMaxSize(),
+                                state = ls, modifier = Modifier.fillMaxSize().background(Color.White),
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 userScrollEnabled = !zoomed

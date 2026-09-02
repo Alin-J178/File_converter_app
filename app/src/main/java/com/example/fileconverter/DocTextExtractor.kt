@@ -188,10 +188,10 @@ object DocTextExtractor {
         val result = mutableListOf<DocBlock>()
         var i = 0
 
+        // Collect consecutive TextBlocks into groups separated by non-TextBlocks or page breaks
         while (i < blocks.size) {
             val block = blocks[i]
             if (block is DocBlock.TextBlock && !block.pageBreakBefore) {
-                // Collect consecutive non-empty TextBlocks
                 val candidateLines = mutableListOf<String>()
                 var j = i
                 while (j < blocks.size && blocks[j] is DocBlock.TextBlock && !(blocks[j] as DocBlock.TextBlock).pageBreakBefore) {
@@ -202,29 +202,20 @@ object DocTextExtractor {
                 }
 
                 if (candidateLines.size >= 2) {
-                    // Parse all rows into columns
-                    val parsedRows = candidateLines.map { line ->
-                        line.split(Regex("\\t|\\s{2,}")).filter { it.isNotBlank() }
-                    }.filter { it.isNotEmpty() }
+                    // Only use tab / multi-space detection (Pass 1)
+                    // Do NOT use word-count detection — it creates false positives
+                    val pass1Rows = candidateLines.map { it.split(Regex("\\t|\\s{2,}")).filter { c -> c.isNotBlank() } }
+                    val pass1ColCounts = pass1Rows.map { it.size }
+                    val pass1Mode = pass1ColCounts.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: 1
 
-                    if (parsedRows.size >= 2) {
-                        // Find the most common column count (mode) >= 2
-                        val colCounts = parsedRows.map { it.size }
-                        val colCountGroups = colCounts.groupingBy { it }.eachCount()
-                        val targetCols = colCountGroups.filter { it.key >= 2 }.maxByOrNull { it.value }?.key
-                            ?: parsedRows.maxOf { it.size }
-
-                        // Filter rows to those within tolerance
-                        val tableRows = parsedRows.filter { row ->
-                            row.size >= 2 && row.size <= targetCols + 2
-                        }
-
-                        if (tableRows.size >= 2 && targetCols >= 2) {
-                            val paddedRows = tableRows.map { row ->
-                                if (row.size < targetCols) row + List(targetCols - row.size) { "" }
-                                else row.take(targetCols)
+                    if (pass1Mode >= 2) {
+                        val tableRows = pass1Rows.filter { it.size in 2..(pass1Mode + 2) }
+                        if (tableRows.size >= 2) {
+                            val padded = tableRows.map { r ->
+                                if (r.size < pass1Mode) r + List(pass1Mode - r.size) { "" }
+                                else r.take(pass1Mode)
                             }
-                            result.add(DocBlock.TableBlock(paddedRows))
+                            result.add(DocBlock.TableBlock(padded))
                             i = j
                             continue
                         }
