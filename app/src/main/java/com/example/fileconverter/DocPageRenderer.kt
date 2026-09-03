@@ -9,20 +9,20 @@ import kotlin.math.ceil
 import kotlin.math.min
 
 /**
- * Renders a [WordDocument] into a list of page-sized Bitmaps,
- * giving a PDF-like page-by-page view.
+ * Renders a [WordDocument] into page-sized Bitmaps (A4-like).
+ * Infers formatting (bold, headings) from text patterns when the parser
+ * doesn't carry formatting info (legacy .doc OLE2 extraction).
  */
 object DocPageRenderer {
 
-    // A4-like proportions at 150 DPI
     private const val PAGE_WIDTH = 1080
-    private const val PAGE_HEIGHT = 1527  // 1527 ~ A4 ratio
-    private const val MARGIN_LEFT = 56
-    private const val MARGIN_RIGHT = 56
-    private const val MARGIN_TOP = 56
-    private const val MARGIN_BOTTOM = 56
+    private const val PAGE_HEIGHT = 1527
+    private const val MARGIN_LEFT = 72
+    private const val MARGIN_RIGHT = 72
+    private const val MARGIN_TOP = 72
+    private const val MARGIN_BOTTOM = 72
     private const val USABLE_WIDTH = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT
-    private const val LINE_SPACING = 1.35f
+    private const val LINE_SPACING = 1.4f
 
     fun render(doc: WordDocument): List<Bitmap> {
         if (doc.blocks.isEmpty()) {
@@ -49,59 +49,32 @@ object DocPageRenderer {
             }
         }
 
-        // Split lines into pages
-        val pages = paginateToBitmaps(lines)
-
-        // Debug: write page info to file
-        try {
-            val f = java.io.File("/sdcard/Documents/doc_debug.txt")
-            f.appendText(buildString {
-                appendLine("\n=== PAGE RENDERER ===")
-                appendLine("Layout lines: ${lines.size}")
-                appendLine("Pages rendered: ${pages.size}")
-                appendLine("Page size: ${PAGE_WIDTH}x${PAGE_HEIGHT}")
-                appendLine("Block types: ${doc.blocks.groupBy { it::class.simpleName }.mapValues { it.value.size }}")
-                appendLine("--- First 15 lines ---")
-                lines.take(15).forEachIndexed { idx, l ->
-                    when (l) {
-                        is LayoutLine.Text -> appendLine("[$idx] TEXT(\"${l.text.take(50)}\" fs=${l.fontSize} bold=${l.isBold})")
-                        is LayoutLine.TableRow -> appendLine("[$idx] TABLEROW ${l.colCount}c hdr=${l.isHeader} ${l.cells.joinToString(" | ") { it.take(20) }}")
-                        is LayoutLine.Spacing -> appendLine("[$idx] SPACING ${l.height}")
-                        is LayoutLine.PageBreak -> appendLine("[$idx] PAGEBREAK")
-                        else -> appendLine("[$idx] ${l::class.simpleName}")
-                    }
-                }
-                appendLine("--- Last 15 lines ---")
-                lines.takeLast(15).forEachIndexed { idx, l ->
-                    val realIdx = lines.size - 15 + idx
-                    when (l) {
-                        is LayoutLine.Text -> appendLine("[$realIdx] TEXT(\"${l.text.take(50)}\" fs=${l.fontSize} bold=${l.isBold})")
-                        is LayoutLine.TableRow -> appendLine("[$realIdx] TABLEROW ${l.colCount}c hdr=${l.isHeader} ${l.cells.joinToString(" | ") { it.take(20) }}")
-                        is LayoutLine.Spacing -> appendLine("[$realIdx] SPACING ${l.height}")
-                        is LayoutLine.PageBreak -> appendLine("[$realIdx] PAGEBREAK")
-                        else -> appendLine("[$realIdx] ${l::class.simpleName}")
-                    }
-                }
-            })
-        } catch (_: Exception) {}
-
-        return pages
+        return paginateToBitmaps(lines)
     }
 
-    // ── Layout helpers ──────────────────────────────────────────
+    // ── Layout lines ──────────────────────────────────────────
 
     private sealed class LayoutLine {
-        data class Text(val text: String, val fontSize: Float, val isBold: Boolean, val isItalic: Boolean, val color: Int, val indent: Int = 0) : LayoutLine()
+        data class Text(
+            val text: String, val fontSize: Float,
+            val isBold: Boolean, val isItalic: Boolean,
+            val color: Int, val indent: Int = 0,
+            val alignment: Int = 0, // 0=left, 1=center, 2=right
+        ) : LayoutLine()
         data class Spacing(val height: Float) : LayoutLine()
-        data class TableRow(val cells: List<String>, val isHeader: Boolean, val colCount: Int) : LayoutLine()
+        data class TableRow(
+            val cells: List<String>, val isHeader: Boolean,
+            val colCount: Int,
+        ) : LayoutLine()
         data class ImageLine(val width: Int, val height: Int) : LayoutLine()
-        data class Separator(val height: Float) : LayoutLine()
         object PageBreak : LayoutLine()
     }
 
+    // ── Block → Lines ─────────────────────────────────────────
+
     private fun layoutParagraph(block: WordBlock.Paragraph, lines: MutableList<LayoutLine>) {
         if (block.runs.isEmpty() || block.runs.all { it.text.isBlank() }) {
-            lines.add(LayoutLine.Spacing(16f))
+            lines.add(LayoutLine.Spacing(10f))
             return
         }
         val combined = block.runs.joinToString("") { it.text }
@@ -109,8 +82,14 @@ object DocPageRenderer {
         val isItalic = block.runs.any { it.italic }
         val fontSize = block.runs.firstOrNull { it.fontSize > 0f }?.fontSize ?: 13f
         val color = block.runs.firstOrNull { it.color != 0 }?.color ?: android.graphics.Color.BLACK
+
+        // Infer formatting from text patterns when parser doesn't carry formatting
+        val inferred = inferFormatting(combined)
+        val actualBold = isBold || inferred.bold
+        val actualFontSize = if (inferred.isHeading) inferred.headingSize else fontSize
         val indent = if (block.indent.firstLine > 0f || block.indent.left > 0f) 1 else 0
-        wrapText(combined, fontSize, isBold, color, indent, lines)
+
+        wrapText(combined, actualFontSize, actualBold, isItalic, color, indent, lines)
         lines.add(LayoutLine.Spacing(8f))
     }
 
@@ -118,7 +97,7 @@ object DocPageRenderer {
         lines.add(LayoutLine.Spacing(16f))
         val combined = block.runs.joinToString("") { it.text }
         val fontSize = headingFontSize(block.level)
-        wrapText(combined, fontSize, true, android.graphics.Color.BLACK, 0, lines)
+        wrapText(combined, fontSize, true, false, android.graphics.Color.BLACK, 0, lines)
         lines.add(LayoutLine.Spacing(12f))
     }
 
@@ -128,7 +107,7 @@ object DocPageRenderer {
         val isBold = block.runs.any { it.bold }
         val fontSize = block.runs.firstOrNull { it.fontSize > 0f }?.fontSize ?: 13f
         val color = block.runs.firstOrNull { it.color != 0 }?.color ?: android.graphics.Color.BLACK
-        wrapText(combined, fontSize, isBold, color, block.level, lines)
+        wrapText(combined, fontSize, isBold, false, color, block.level, lines)
         lines.add(LayoutLine.Spacing(4f))
     }
 
@@ -168,20 +147,53 @@ object DocPageRenderer {
         lines.add(LayoutLine.Spacing(4f))
     }
 
-    private fun wrapText(text: String, fontSize: Float, isBold: Boolean, color: Int, indent: Int, lines: MutableList<LayoutLine>) {
+    // ── Formatting inference ───────────────────────────────────
+
+    private data class InferredFormat(
+        val bold: Boolean, val isHeading: Boolean, val headingSize: Float,
+    )
+
+    private fun inferFormatting(text: String): InferredFormat {
+        val trimmed = text.trim()
+        // Title patterns (ALL CAPS or known title words)
+        val isAllCaps = trimmed.length in 3..80 && trimmed == trimmed.uppercase() && trimmed.any { it.isLetter() }
+        val titleKeywords = listOf("INVENTORI", "PERSONALITI", "SIDEK", "IPS", "BORANG", "ARAHAN", "SKOR", "PROFIL")
+        val hasTitleKeyword = titleKeywords.any { trimmed.contains(it, ignoreCase = true) }
+        val isShort = trimmed.length < 40
+        val isTitle = isAllCaps || (hasTitleKeyword && isShort && trimmed.count { it.isLetter() } > 5)
+
+        // Numbered item (e.g., "1. Agresif")
+        val numberedItem = Regex("^\\d+\\.\\s+.+").matches(trimmed)
+        // Numbered list item with text (e.g., "1. Agresif ...Trait personality...")
+        val isNumberedBlock = numberedItem && !trimmed.contains(".")
+
+        return when {
+            isTitle && trimmed.length < 30 -> InferredFormat(true, true, 24f)
+            isTitle -> InferredFormat(true, true, 20f)
+            numberedItem -> InferredFormat(true, false, 14f)
+            else -> InferredFormat(false, false, 13f)
+        }
+    }
+
+    // ── Text wrapping ──────────────────────────────────────────
+
+    private fun wrapText(
+        text: String, fontSize: Float, isBold: Boolean, isItalic: Boolean,
+        color: Int, indent: Int, lines: MutableList<LayoutLine>,
+    ) {
         val paint = Paint().apply {
-            this.textSize = fontSize
-            this.isFakeBoldText = isBold
-            this.isAntiAlias = true
+            textSize = fontSize
+            isFakeBoldText = isBold
+            isAntiAlias = true
             typeface = if (isBold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
         }
-        val maxWidth = USABLE_WIDTH - indent * 40
+        val maxWidth = USABLE_WIDTH - indent * 50
         val words = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
         var currentLine = StringBuilder()
         for (word in words) {
             val test = if (currentLine.isEmpty()) word else "$currentLine $word"
             if (paint.measureText(test) > maxWidth && currentLine.isNotEmpty()) {
-                lines.add(LayoutLine.Text(currentLine.toString(), fontSize, isBold, false, color, indent))
+                lines.add(LayoutLine.Text(currentLine.toString(), fontSize, isBold, isItalic, color, indent))
                 currentLine = StringBuilder(word)
             } else {
                 if (currentLine.isEmpty()) currentLine = StringBuilder(word)
@@ -189,46 +201,37 @@ object DocPageRenderer {
             }
         }
         if (currentLine.isNotEmpty()) {
-            lines.add(LayoutLine.Text(currentLine.toString(), fontSize, isBold, false, color, indent))
+            lines.add(LayoutLine.Text(currentLine.toString(), fontSize, isBold, isItalic, color, indent))
         }
         if (text.isBlank()) {
             lines.add(LayoutLine.Spacing(fontSize * LINE_SPACING))
         }
     }
 
-    // ── Pagination ──────────────────────────────────────────────
+    // ── Pagination + Bitmap rendering ──────────────────────────
 
-    private fun paginateToBitmaps(lines: MutableList<LayoutLine>): List<Bitmap> {
+    private fun paginateToBitmaps(lines: List<LayoutLine>): List<Bitmap> {
         val pages = mutableListOf<Bitmap>()
         var currentY = 0f
         var page = createBlankPage()
         var canvas = Canvas(page)
 
-        fun startNewPage(): Canvas {
+        fun newPage(): Canvas {
             pages.add(page)
             page = createBlankPage()
             currentY = MARGIN_TOP.toFloat()
             return Canvas(page)
         }
-
         currentY = MARGIN_TOP.toFloat()
 
         for (line in lines) {
             when (line) {
-                is LayoutLine.PageBreak -> {
-                    canvas = startNewPage()
-                    continue
-                }
-                is LayoutLine.Spacing -> {
-                    currentY += line.height
-                }
-                is LayoutLine.Separator -> {
-                    currentY += line.height
-                }
+                is LayoutLine.PageBreak -> { canvas = newPage(); continue }
+                is LayoutLine.Spacing -> { currentY += line.height }
                 is LayoutLine.Text -> {
                     val lineHeight = line.fontSize * LINE_SPACING
                     if (currentY + lineHeight > PAGE_HEIGHT - MARGIN_BOTTOM) {
-                        canvas = startNewPage()
+                        canvas = newPage()
                     }
                     val paint = Paint().apply {
                         textSize = line.fontSize
@@ -237,12 +240,18 @@ object DocPageRenderer {
                         isAntiAlias = true
                         typeface = if (line.isBold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                     }
-                    val x = MARGIN_LEFT + line.indent * 40.toFloat()
-                    canvas.drawText(line.text, x, currentY + line.fontSize, paint)
+                    val x = MARGIN_LEFT + line.indent * 50f
+                    // Handle alignment
+                    val drawX = when (line.alignment) {
+                        1 -> MARGIN_LEFT + (USABLE_WIDTH - paint.measureText(line.text)) / 2f
+                        2 -> MARGIN_LEFT + USABLE_WIDTH - paint.measureText(line.text)
+                        else -> x
+                    }
+                    canvas.drawText(line.text, drawX, currentY + line.fontSize, paint)
                     currentY += lineHeight
                 }
                 is LayoutLine.TableRow -> {
-                    val fontSize = if (line.isHeader) 12f else 11f
+                    val fontSize = if (line.isHeader) 13f else 12f
                     val textPaint = Paint().apply {
                         textSize = fontSize
                         isFakeBoldText = line.isHeader
@@ -250,81 +259,75 @@ object DocPageRenderer {
                         isAntiAlias = true
                         typeface = if (line.isHeader) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                     }
-                    val lineHeight = fontSize * 1.4f
-                    val padding = 6f
+                    val lineHeight = fontSize * 1.5f
+                    val padding = 8f
 
-                    // Calculate column widths: first col (Bil.) narrow, second (Item) wide, rest medium
-                    val colWidths = FloatArray(line.colCount)
-                    val totalWeight = when (line.colCount) {
-                        4 -> floatArrayOf(1f, 5f, 1.5f, 1.5f)  // Bil, Item, Ya, Tidak
-                        else -> FloatArray(line.colCount) { 1f }
-                    }
-                    var totalW = 0f
-                    for (w in totalWeight) totalW += w
-                    for (ci in colWidths.indices) {
-                        colWidths[ci] = USABLE_WIDTH * totalWeight[ci] / totalW
+                    // Column widths: weighted (Bil. narrow, Item wide, Ya/Tidak medium)
+                    val colWidths = when (line.colCount) {
+                        4 -> floatArrayOf(56f, USABLE_WIDTH - 56f - 120f - 120f, 120f, 120f)
+                        else -> FloatArray(line.colCount) { USABLE_WIDTH / line.colCount.toFloat() }
                     }
 
-                    // Calculate row height based on longest cell text
+                    // Calculate row height
                     var maxLines = 1
-                    for ((ci, cellText) in line.cells.withIndex()) {
-                        val cw = colWidths[ci]
-                        val maxTextWidth = cw - padding * 2
+                    for ((ci2, cellText) in line.cells.withIndex()) {
+                        val maxTextWidth = colWidths[ci2] - padding * 2
                         val words = cellText.split(" ")
                         var lineCount = 1
-                        var currentLineWidth = 0f
+                        var curWidth = 0f
                         for (word in words) {
-                            val wordWidth = textPaint.measureText(word)
-                            if (currentLineWidth + wordWidth > maxTextWidth && currentLineWidth > 0) {
+                            val ww = textPaint.measureText(word)
+                            if (curWidth + ww > maxTextWidth && curWidth > 0) {
                                 lineCount++
-                                currentLineWidth = wordWidth
+                                curWidth = ww
                             } else {
-                                currentLineWidth += wordWidth + textPaint.measureText(" ")
+                                curWidth += ww + textPaint.measureText(" ")
                             }
                         }
                         maxLines = maxOf(maxLines, lineCount)
                     }
-                    val cellHeight = (lineHeight * maxLines + padding * 2).coerceAtLeast(28f)
+                    val cellHeight = (lineHeight * maxLines + padding * 2).coerceAtLeast(32f)
 
                     if (currentY + cellHeight > PAGE_HEIGHT - MARGIN_BOTTOM) {
-                        canvas = startNewPage()
+                        canvas = newPage()
                     }
 
-                    val bgPaint = Paint().apply {
-                        color = if (line.isHeader) android.graphics.Color.rgb(240, 240, 240) else android.graphics.Color.TRANSPARENT
-                        style = Paint.Style.FILL
-                    }
-                    val borderPaint = Paint().apply {
-                        color = android.graphics.Color.rgb(180, 180, 180)
-                        style = Paint.Style.STROKE
-                        strokeWidth = 0.5f
-                    }
-
+                    // Draw cells
                     var cellX = MARGIN_LEFT.toFloat()
                     for ((ci, cellText) in line.cells.withIndex()) {
                         val cw = colWidths[ci]
-                        val cellTop = currentY
                         // Background
-                        canvas.drawRect(cellX, cellTop, cellX + cw, cellTop + cellHeight, bgPaint)
+                        val bgPaint = Paint().apply {
+                            color = if (line.isHeader) android.graphics.Color.rgb(235, 235, 235)
+                            else if (ci % 2 == 1) android.graphics.Color.rgb(248, 248, 248)
+                            else android.graphics.Color.TRANSPARENT
+                            style = Paint.Style.FILL
+                        }
+                        canvas.drawRect(cellX, currentY, cellX + cw, currentY + cellHeight, bgPaint)
                         // Border
-                        canvas.drawRect(cellX, cellTop, cellX + cw, cellTop + cellHeight, borderPaint)
-                        // Draw wrapped text
+                        val borderPaint = Paint().apply {
+                            color = android.graphics.Color.rgb(180, 180, 180)
+                            style = Paint.Style.STROKE
+                            strokeWidth = 1f
+                        }
+                        canvas.drawRect(cellX, currentY, cellX + cw, currentY + cellHeight, borderPaint)
+                        // Text
                         val maxTextWidth = cw - padding * 2
                         val words = cellText.split(" ")
-                        var textY = cellTop + padding + fontSize
+                        var textY = currentY + padding + fontSize
                         var lineStart = StringBuilder()
                         var lineWidth = 0f
                         for (word in words) {
-                            val wordWidth = textPaint.measureText(word)
-                            val testWidth = if (lineStart.isEmpty()) wordWidth else lineWidth + textPaint.measureText(" ") + wordWidth
-                            if (testWidth > maxTextWidth && lineStart.isNotEmpty()) {
+                            val ww = textPaint.measureText(word)
+                            val testW = if (lineStart.isEmpty()) ww else lineWidth + textPaint.measureText(" ") + ww
+                            if (testW > maxTextWidth && lineStart.isNotEmpty()) {
                                 canvas.drawText(lineStart.toString(), cellX + padding, textY, textPaint)
                                 textY += lineHeight
                                 lineStart = StringBuilder(word)
-                                lineWidth = wordWidth
+                                lineWidth = ww
                             } else {
                                 if (lineStart.isEmpty()) lineStart.append(word) else lineStart.append(" ").append(word)
-                                lineWidth = testWidth
+                                lineWidth = testW
                             }
                         }
                         if (lineStart.isNotEmpty()) {
@@ -336,32 +339,25 @@ object DocPageRenderer {
                 }
                 is LayoutLine.ImageLine -> {
                     val h = line.height.toFloat()
-                    if (currentY + h > PAGE_HEIGHT - MARGIN_BOTTOM) {
-                        canvas = startNewPage()
-                    }
+                    if (currentY + h > PAGE_HEIGHT - MARGIN_BOTTOM) canvas = newPage()
                     val placeholderPaint = Paint().apply {
                         color = android.graphics.Color.rgb(230, 230, 230)
                         style = Paint.Style.FILL
                     }
-                    val x = MARGIN_LEFT.toFloat()
-                    canvas.drawRect(x, currentY, x + line.width.toFloat(), currentY + h, placeholderPaint)
+                    canvas.drawRect(MARGIN_LEFT.toFloat(), currentY, MARGIN_LEFT + line.width.toFloat(), currentY + h, placeholderPaint)
                     val labelPaint = Paint().apply { color = android.graphics.Color.GRAY; textSize = 24f; textAlign = Paint.Align.CENTER; isAntiAlias = true }
-                    canvas.drawText("[Image]", x + line.width / 2f, currentY + h / 2f + 8f, labelPaint)
+                    canvas.drawText("[Image]", MARGIN_LEFT + line.width / 2f, currentY + h / 2f + 8f, labelPaint)
                     currentY += h
                 }
             }
         }
 
-        // Add the last page
         pages.add(page)
-
-        return pages.ifEmpty {
-            listOf(createBlankPage())
-        }
+        return pages.ifEmpty { listOf(createBlankPage()) }
     }
 
     private fun createBlankPage(): Bitmap {
-        val bmp = Bitmap.createBitmap(PAGE_WIDTH * 1, PAGE_HEIGHT * 1, Bitmap.Config.ARGB_8888)
+        val bmp = Bitmap.createBitmap(PAGE_WIDTH, PAGE_HEIGHT, Bitmap.Config.ARGB_8888)
         Canvas(bmp).drawColor(android.graphics.Color.WHITE)
         return bmp
     }

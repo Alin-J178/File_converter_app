@@ -14,7 +14,7 @@ object DocParser {
     fun parseBytes(bytes: ByteArray): WordDocument {
         val docText = DocTextExtractor.extract(bytes)
         if (docText.text.isBlank()) return WordDocument(listOf(WordBlock.Paragraph(listOf(WordRun("Could not extract text from DOC file")))))
-        // Debug: write to file (Vivo suppresses all logcat)
+        // Debug: write to file
         try {
             val f = java.io.File("/sdcard/Documents/doc_debug.txt")
             f.parentFile?.mkdirs()
@@ -22,10 +22,7 @@ object DocParser {
                 appendLine("Text length: ${docText.text.length}")
                 appendLine("hasTableMarkers: ${docText.hasTableMarkers}")
                 appendLine("cellCount: ${docText.text.count { it == DocTextExtractor.CELL_MARKER }}")
-                appendLine("rowCount: ${docText.text.count { it == DocTextExtractor.ROW_MARKER }}")
                 appendLine("crCount: ${docText.text.count { it == '\r' }}")
-                appendLine("First 800 chars:")
-                appendLine(docText.text.take(800).replace("\n", "[LN]").replace("\r", "[CR]"))
             })
         } catch (_: Exception) {}
         val blocks = mutableListOf<WordBlock>()
@@ -36,16 +33,19 @@ object DocParser {
                 appendLine("Blocks: ${blocks.size}")
                 appendLine("Tables: ${blocks.count { it is WordBlock.Table }}")
                 appendLine("Paragraphs: ${blocks.count { it is WordBlock.Paragraph }}")
-                blocks.take(20).forEachIndexed { idx, b ->
+                blocks.forEachIndexed { idx, b ->
                     when (b) {
                         is WordBlock.Table -> {
                             appendLine("[$idx] TABLE ${b.rows.size}r x ${b.rows.maxOfOrNull { it.cells.size } ?: 0}c")
-                            // Show last 5 rows
-                            b.rows.takeLast(5).forEachIndexed { ri, row ->
-                                appendLine("  last-r${b.rows.size - 5 + ri}: ${row.cells.joinToString(" | ") { it.blocks.filterIsInstance<WordBlock.Paragraph>().joinToString("") { p -> p.runs.joinToString("") { r -> r.text } }.take(30) }}")
+                            b.rows.takeLast(3).forEachIndexed { ri, row ->
+                                appendLine("  last-r${b.rows.size - 3 + ri}: ${row.cells.joinToString(" | ") { it.blocks.filterIsInstance<WordBlock.Paragraph>().joinToString("") { p -> p.runs.joinToString("") { r -> r.text } }.take(40) }}")
                             }
                         }
-                        is WordBlock.Paragraph -> appendLine("[$idx] PARA \"${b.runs.joinToString("") { it.text }.take(80)}\"")
+                        is WordBlock.Paragraph -> {
+                            val txt = b.runs.joinToString("") { it.text }
+                            appendLine("[$idx] PARA (${txt.length}chars) \"${txt.take(120)}\"")
+                            if (txt.length > 120) appendLine("  ...full: \"${txt.take(500)}\"")
+                        }
                         else -> appendLine("[$idx] ${b::class.simpleName}")
                     }
                 }
@@ -56,14 +56,11 @@ object DocParser {
 
     /**
      * Parse text that contains \u0007 (cell) markers from Word table format.
-     * Strategy: split text into pre-table paragraphs and table cells,
-     * then group cells into rows based on detected column count.
      */
     private fun parseWithTableMarkers(raw: String, blocks: MutableList<WordBlock>) {
         var sb = StringBuilder()
         var inFieldCode = false
 
-        // Phase 1: Collect pre-table paragraphs and table cells separately
         val preTableParagraphs = mutableListOf<String>()
         val tableCells = mutableListOf<String>()
         var foundFirstCellMarker = false
@@ -89,7 +86,6 @@ object DocParser {
                     if (!foundFirstCellMarker) {
                         foundFirstCellMarker = true
                         inTable = true
-                        // Transfer any accumulated sb content
                         val t = sb.toString().trim()
                         if (t.isNotEmpty()) tableCells.add(t)
                         sb.setLength(0)
@@ -106,8 +102,6 @@ object DocParser {
                 }
                 c == '\r' || c == '\n' -> {
                     if (inTable) {
-                        // \r in table context: ignore (cells are separated by \u0007, not \r)
-                        // Just append a space so wrapped text doesn't merge words
                         sb.append(' ')
                     } else {
                         flushCellContent()
@@ -119,7 +113,6 @@ object DocParser {
                 else -> sb.append(c)
             }
         }
-        // Flush remaining content
         if (inTable) {
             val t = sb.toString().trim()
             if (t.isNotEmpty()) tableCells.add(t)
@@ -128,53 +121,43 @@ object DocParser {
             if (t.isNotEmpty()) preTableParagraphs.add(t)
         }
 
-        // Emit pre-table paragraphs
+        // Emit pre-table paragraphs with heading detection
         for (p in preTableParagraphs) {
-            blocks += WordBlock.Paragraph(listOf(WordRun(p)))
+            emitFormattedParagraph(p, blocks)
         }
 
         // Phase 2: Group table cells into rows
         if (tableCells.size < 4) {
-            // Not enough cells for a table — emit as paragraphs
             for (c in tableCells) {
-                if (c.isNotBlank()) blocks += WordBlock.Paragraph(listOf(WordRun(c)))
+                if (c.isNotBlank()) emitFormattedParagraph(c, blocks)
             }
             return
         }
 
-        // Filter out truly empty cells that are likely row separators
-        // Keep single-space cells (they're checkbox values)
-        // But remove cells that are completely empty AND surrounded by other empties
         val cleanedCells = mutableListOf<String>()
         for (cell in tableCells) {
             cleanedCells.add(cell)
         }
 
-        // Detect column count from the header row
-        var bestCols = 0
-        if (cleanedCells.isNotEmpty()) {
-            var headerLen = 0
-            for (ci in cleanedCells.indices) {
-                val cell = cleanedCells[ci]
-                if (ci > 0 && cell.isBlank() && ci + 1 < cleanedCells.size && cleanedCells[ci + 1].toIntOrNull() != null) {
-                    headerLen = ci; break
-                }
-                if (ci > 0 && cell.toIntOrNull() != null && !cleanedCells[ci - 1].isBlank() && cleanedCells[ci - 1].toIntOrNull() == null) {
-                    headerLen = ci; break
-                }
-                headerLen = ci + 1
+        // Detect column count: look at header pattern
+        // Header is "Bil.\u0007Item\u0007Ya\u0007Tidak" = 4 columns
+        // After header, cells repeat: separator \u0007 then 4 data cells
+        var bestCols = 4 // Default for this doc format
+        if (cleanedCells.size >= 4) {
+            // Check: is first cell "Bil." or similar short label?
+            val first = cleanedCells[0].trim()
+            if (first.length < 10) {
+                bestCols = 4 // Bil, Item, Ya, Tidak
             }
-            bestCols = headerLen.coerceIn(2, 10)
         }
-        if (bestCols < 2) bestCols = 4
 
-        // Detect if there are empty separator cells between rows
-        // Pattern: every (bestCols + 1) cells, the last one is empty (separator from \u0007\u0007)
-        // Check: count empty cells in the first few groups
+        // Detect separator pattern: every (bestCols) cells, check if there's an empty cell
+        // Pattern: [Bil] [Item] [Ya] [Tidak] [empty-separator] [1] [text] [space] [space] [empty-separator] ...
+        // Actually the separator is \u0007\u0007 which creates an empty cell between rows
         val stride = bestCols + 1
         var separatorCount = 0
         var checkGroups = 0
-        var ci = bestCols // start after header
+        var ci = bestCols
         while (ci + 1 < cleanedCells.size && checkGroups < 5) {
             if (cleanedCells[ci].isBlank() && ci + 1 < cleanedCells.size && cleanedCells[ci + 1].isNotBlank()) {
                 separatorCount++
@@ -198,15 +181,22 @@ object DocParser {
 
         // Split off trailing non-data rows and emit as paragraphs
         val dataRows = mutableListOf<List<String>>()
-        val extraParagraphs = mutableListOf<String>()
+        val extraContent = mutableListOf<String>()
         for (row in rows) {
             val firstCell = row.firstOrNull() ?: ""
-            // If first cell is very long (>40 chars) or looks like section text, split it out
-            if (firstCell.length > 40 || firstCell.contains("BORANG") || firstCell.contains("INVENTORI PERSONALITI")) {
-                // This row is not table data — emit all non-empty cells as paragraphs
+            val allText = row.joinToString(" ")
+            // Detect if this is a non-data row (scoring form, title text, etc.)
+            if (firstCell.length > 40 ||
+                firstCell.contains("BORANG", ignoreCase = true) ||
+                firstCell.contains("INVENTORI PERSONALITI", ignoreCase = true) ||
+                firstCell.contains("Helaian", ignoreCase = true) ||
+                firstCell.contains("Sidek's Personality", ignoreCase = true) ||
+                allText.length > 200
+            ) {
+                // Split this row's cells into paragraphs
                 for (cell in row) {
-                    if (cell.isNotBlank() && cell.length > 3) {
-                        extraParagraphs.add(cell)
+                    if (cell.isNotBlank() && cell.length > 2) {
+                        extraContent.add(cell)
                     }
                 }
             } else {
@@ -223,20 +213,88 @@ object DocParser {
                     }
                 )
             })
-            // Emit extra content that was after the table
-            for (p in extraParagraphs) {
-                blocks += WordBlock.Paragraph(listOf(WordRun(p)))
-            }
-        } else {
-            // Fallback: emit as paragraphs
-            for (c in cleanedCells) {
-                if (c.isNotBlank()) blocks += WordBlock.Paragraph(listOf(WordRun(c)))
-            }
+        }
+
+        // Emit extra content with formatting
+        for (p in extraContent) {
+            emitFormattedParagraph(p, blocks)
         }
     }
 
+    /**
+     * Emit a paragraph with inferred formatting (headings, bold, numbered items).
+     */
+    private fun emitFormattedParagraph(text: String, blocks: MutableList<WordBlock>) {
+        if (text.isBlank()) return
+        val trimmed = text.trim()
+
+        // Split long paragraphs at sentence boundaries (periods followed by space)
+        // But keep numbered items together
+        val sentences = splitIntoLogicalParagraphs(trimmed)
+        for (sentence in sentences) {
+            if (sentence.isBlank()) continue
+            val runs = listOf(WordRun(sentence))
+            blocks += WordBlock.Paragraph(runs)
+        }
+    }
+
+    /**
+     * Split a long text into logical paragraphs:
+     * - Numbered items (1. ... 2. ...) become separate paragraphs
+     * - Title-like text (ALL CAPS, short) becomes separate paragraphs
+     * - Long text gets split at natural breaks
+     */
+    private fun splitIntoLogicalParagraphs(text: String): List<String> {
+        // Check if text contains numbered items (e.g., "1. Agresif\nTrait personality...")
+        val numberedPattern = Regex("(?=\\b\\d+\\.\\s)")
+        val parts = text.split(numberedPattern).filter { it.isNotBlank() }
+
+        if (parts.size > 1) {
+            // Text has numbered items — split them
+            return parts.map { it.trim() }
+        }
+
+        // Check for title + body pattern (e.g., "INVENTORI PERSONALITI SIDEK (IPS)  Inventori personality...")
+        val titlePattern = Regex("^([A-Z][A-Z\\s()]+)\\s{2,}(.+)")
+        val titleMatch = titlePattern.find(text)
+        if (titleMatch != null) {
+            val title = titleMatch.groupValues[1].trim()
+            val body = titleMatch.groupValues[2].trim()
+            val result = mutableListOf<String>()
+            if (title.length > 3) result.add(title)
+            // Split body at "trait personality" or numbered patterns
+            val bodyParts = splitBodyIntoParagraphs(body)
+            result.addAll(bodyParts)
+            return result
+        }
+
+        // Check for "Trait personality" pattern which starts new paragraphs
+        val traitPattern = Regex("(?=Trait personality yang menunjukkan)")
+        val traitParts = text.split(traitPattern).filter { it.isNotBlank() }
+        if (traitParts.size > 1) {
+            return traitParts.map { it.trim() }
+        }
+
+        return listOf(text)
+    }
+
+    private fun splitBodyIntoParagraphs(text: String): List<String> {
+        val result = mutableListOf<String>()
+        // Split at "Trait personality" or "1." patterns
+        val pattern = Regex("(?=Trait personality|\\b\\d+\\.\\s)")
+        val parts = text.split(pattern).filter { it.isNotBlank() }
+        if (parts.size > 1) {
+            for (part in parts) {
+                val trimmed = part.trim()
+                if (trimmed.isNotBlank()) result.add(trimmed)
+            }
+        } else {
+            result.add(text)
+        }
+        return result
+    }
+
     private fun parseAsParagraphs(raw: String, blocks: MutableList<WordBlock>) {
-        // Split into groups separated by blank lines (consecutive CR/LF)
         data class TextGroup(val lines: MutableList<String> = mutableListOf())
         val groups = mutableListOf<TextGroup>()
         val current = StringBuilder()
@@ -272,7 +330,7 @@ object DocParser {
             val lines = group.lines
             if (lines.isEmpty()) continue
             if (lines.size == 1) {
-                blocks += WordBlock.Paragraph(listOf(WordRun(lines[0])))
+                emitFormattedParagraph(lines[0], blocks)
                 continue
             }
             val pass1Rows = lines.map { it.split(Regex("\t|\u0007|\\s{2,}")).filter { c -> c.isNotBlank() } }
@@ -292,7 +350,7 @@ object DocParser {
                 }
             }
             for (line in lines) {
-                blocks += WordBlock.Paragraph(listOf(WordRun(line)))
+                emitFormattedParagraph(line, blocks)
             }
         }
     }
