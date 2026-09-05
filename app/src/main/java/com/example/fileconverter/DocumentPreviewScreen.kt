@@ -5,6 +5,12 @@ import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.util.Log
+import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -61,6 +67,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -567,21 +574,32 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
     var pg by remember { mutableIntStateOf(0) }
     var loading by remember { mutableStateOf(true) }
     var err by remember { mutableStateOf<String?>(null) }
+
+    // WebView (docx-preview.js) rendering state for .docx files.
+    val isDocxWeb = ext == "docx" || mt.contains("wordprocessingml")
+    var webReady by remember { mutableStateOf(false) }
+    var webTotal by remember { mutableIntStateOf(0) }
+    var webCur by remember { mutableIntStateOf(1) }
     var sc by remember { mutableFloatStateOf(1f) }
     var ox by remember { mutableFloatStateOf(0f) }
     var oy by remember { mutableFloatStateOf(0f) }
     val zoomed = sc > 1.05f
 
     LaunchedEffect(uri, ext) {
-        loading = true; err = null; doc = null; bmps = emptyList()
+        loading = true; err = null; doc = null; bmps = emptyList(); webReady = false
         withContext(Dispatchers.IO) {
             try {
                 android.util.Log.e("DOC_DEBUG", "Opening file: ext=$ext, mime=$mt")
                 when {
                     ext == "pdf" || mt.contains("pdf") -> bmps = renderPdfPages(ctx, uri)
-                    ext == "docx" || mt.contains("wordprocessingml") -> {
-                        val wordDoc = DocxParser.parse(ctx, uri)
-                        bmps = DocPageRenderer.render(wordDoc)
+                    isDocxWeb -> {
+                        // .docx preview is rendered by docx-preview.js in a WebView (Part 4):
+                        // copy the bytes to a cache file that the WebView fetches same-origin.
+                        val cacheFile = java.io.File(ctx.cacheDir, "docx_preview_${uri.hashCode()}.docx")
+                        ctx.contentResolver.openInputStream(uri)?.use { input ->
+                            java.io.FileOutputStream(cacheFile).use { out -> input.copyTo(out) }
+                        }
+                        webReady = true
                     }
                     ext == "doc" || mt.contains("msword") -> {
                         val wordDoc = DocParser.parse(ctx, uri)
@@ -608,7 +626,7 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
                     }
                     else -> doc = ParsedDocument.Text(TextDocument(listOf(TextBlock("Preview not available for .$ext"))))
                 }
-                if (doc == null && bmps.isEmpty()) err = "Could not read file content"
+                if (doc == null && bmps.isEmpty() && !isDocxWeb) err = "Could not read file content"
             } catch (e: Exception) {
                 Log.e("DocPreview", "Failed to parse $ext", e)
                 err = "Error: ${e.message ?: "Unknown"}"
@@ -617,7 +635,8 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
         }
     }
 
-    val tp = if (bmps.isNotEmpty()) bmps.size else 1
+    val tp = if (isDocxWeb) webTotal else if (bmps.isNotEmpty()) bmps.size else 1
+    val cur = if (isDocxWeb) webCur else pg + 1
     val ac = Color(docFormatColor(ext))
 
     Box(modifier = Modifier.fillMaxSize().background(c.background).safeDrawingPadding()) {
@@ -628,7 +647,7 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(fileName, color = c.onBackground, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("Page ${pg + 1} of $tp" + if (zoomed) " \u2022 ${String.format("%.1f", sc)}\u00d7" else "", color = c.muted, fontSize = 12.sp)
+                    Text("Page $cur of $tp" + if (zoomed) " \u2022 ${String.format("%.1f", sc)}\u00d7" else "", color = c.muted, fontSize = 12.sp)
                 }
                 if (loading) CircularProgressIndicator(modifier = Modifier.size(24.dp), color = ac, strokeWidth = 2.dp)
             }
@@ -675,6 +694,82 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(err!!, color = c.pink, fontSize = 14.sp)
                             }
+                        }
+                        isDocxWeb && webReady -> {
+                            // Part 4: docx-preview.js inside a WebView — real Word rendering
+                            // (styles, tables, page breaks) instead of the Canvas re-layout.
+                            AndroidView(
+                                factory = { context ->
+                                    WebView(context).apply {
+                                        layoutParams = android.view.ViewGroup.LayoutParams(
+                                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                        )
+                                        settings.javaScriptEnabled = true
+                                        settings.allowFileAccess = true
+                                        settings.domStorageEnabled = true
+                                        settings.loadWithOverviewMode = true
+                                        settings.useWideViewPort = true
+                                        settings.builtInZoomControls = true
+                                        settings.displayZoomControls = false
+                                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                                        settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                                        addJavascriptInterface(object {
+                                            @JavascriptInterface
+                                            fun setPage(current: Int, total: Int) {
+                                                post {
+                                                    webCur = current
+                                                    webTotal = total
+                                                    loading = false
+                                                }
+                                            }
+                                            @JavascriptInterface
+                                            fun onReady() {
+                                                post { loading = false }
+                                            }
+                                            @JavascriptInterface
+                                            fun onError(message: String) {
+                                                post {
+                                                    Log.e("DocxWeb", "render error: $message")
+                                                    err = "Preview failed: $message"
+                                                    loading = false
+                                                }
+                                            }
+                                        }, "Android")
+                                        webViewClient = object : WebViewClient() {
+                                            override fun shouldInterceptRequest(
+                                                view: WebView,
+                                                request: WebResourceRequest,
+                                            ): WebResourceResponse? {
+                                                val urlPath = request.url.path?.trimStart('/') ?: ""
+                                                // Serve the cached docx + bundled JS libraries
+                                                // same-origin (docx.local) so fetch() works offline.
+                                                return when {
+                                                    urlPath == "file.docx" -> {
+                                                        val f = java.io.File(context.cacheDir, "docx_preview_${uri.hashCode()}.docx")
+                                                        if (f.exists()) {
+                                                            WebResourceResponse(
+                                                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                                                null, f.inputStream(),
+                                                            )
+                                                        } else null
+                                                    }
+                                                    urlPath == "jszip.min.js" || urlPath == "docx-preview.min.js" -> {
+                                                        try {
+                                                            val am = context.assets
+                                                            WebResourceResponse("application/javascript", "utf-8", am.open(urlPath))
+                                                        } catch (_: Exception) { null }
+                                                    }
+                                                    else -> null
+                                                }
+                                            }
+                                        }
+                                        loadUrl("https://docx.local/docx_viewer.html")
+                                    }
+                                },
+                                update = { /* state flows through JS bridge */ },
+                                modifier = Modifier.fillMaxSize(),
+                            )
                         }
                         bmps.isNotEmpty() -> {
                             val ls = rememberLazyListState()

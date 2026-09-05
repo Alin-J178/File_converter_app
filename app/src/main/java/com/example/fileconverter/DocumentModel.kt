@@ -69,6 +69,13 @@ sealed class WordBlock {
 
     data class ListItem(
         val runs: List<WordRun>, val level: Int = 0, val bulleted: Boolean = true,
+        /** Word numbering format resolved from numbering.xml: "decimal", "lowerLetter",
+         *  "upperLetter", "lowerRoman", "upperRoman", or "" (bullet / not a numbered list). */
+        val numFmt: String = "",
+        /** Word numbering instance (numId) so renderers can reset counters between lists. */
+        val numId: Int = -1,
+        /** Restart value for this level from numbering.xml (<w:start/>). */
+        val start: Int = 1,
     )  : WordBlock()
 
     data class Unsupported(val description: String)  : WordBlock()
@@ -86,6 +93,9 @@ data class WordTableRow(val cells: List<WordTableCell>, val isHeader: Boolean = 
 data class WordTableCell(
     val blocks: List<WordBlock>, val gridSpan: Int = 1,
     val background: Int = 0, val width: Float = 0f,
+    /** True when this cell is the "continue" half of a <w:vMerge/> (vertical merge).
+     *  Content lives in the first (restart) cell; renderers should not redraw it. */
+    val vMergeCont: Boolean = false,
 )
 
 // ═══════════════════════════════════════════════════════════════

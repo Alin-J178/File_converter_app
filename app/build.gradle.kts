@@ -21,10 +21,28 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // POI (legacy .doc HWPF reader) is large; shrink + obfuscate to keep the
+            // APK reasonable on release. Debug builds stay unminified for fast builds.
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
+            )
+        }
+        debug {
+            isMinifyEnabled = false
+        }
+    }
+    // minSdk 26 >= 21 => native multidex is automatic; no extra config needed.
+    packaging {
+        resources {
+            excludes += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "META-INF/versions/**"
             )
         }
     }
@@ -54,6 +72,8 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.caverock.androidsvg)
+    // HWPF: Word 97-2003 (.doc) binary format reader — used ONLY in the .doc preview path.
+    implementation(libs.poi.scratchpad)
     debugImplementation(libs.androidx.ui.tooling)
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext)

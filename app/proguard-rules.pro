@@ -1,1 +1,13 @@
-# Add project specific ProGuard rules here.
+# POI HWPF (.doc) parsing reads class metadata by name in a few places; keep everything.
+-keep class org.apache.poi.** { *; }
+-keep class org.apache.commons.codec.** { *; }
+-keep class org.apache.commons.collections4.** { *; }
+-keep class org.apache.commons.math3.** { *; }
+-keep class org.apache.commons.io.** { *; }
+-keep class com.zaxxer.sparsebitset.** { *; }
+-dontwarn org.apache.poi.**
+-dontwarn org.apache.logging.log4j.**
+-dontwarn com.zaxxer.sparsebitset.**
+-dontwarn java.awt.**
+-dontwarn javax.swing.**
+-dontwarn org.w3c.dom.**
