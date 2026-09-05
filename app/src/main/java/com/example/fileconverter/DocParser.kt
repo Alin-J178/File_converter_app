@@ -53,6 +53,8 @@ object DocParser {
         var inFieldCode = false
         val allCells = mutableListOf<String>()
         var foundFirstCellMarker = false
+        // Index in allCells right after which a page-break (\u000C) occurs
+        val prePageBreaks = mutableSetOf<Int>()
 
         fun flushCell() {
             val t = sb.toString().trim()
@@ -72,7 +74,13 @@ object DocParser {
                 }
                 c == DocTextExtractor.ROW_MARKER -> { flushCell() }
                 c == '\r' || c == '\n' -> { if (foundFirstCellMarker) sb.append(' ') else flushCell() }
-                c == '\u000C' -> flushCell()
+                c == '\u000C' -> {
+                    val wasEmpty = sb.isEmpty()
+                    flushCell()
+                    // Keep the page-break so title / instructions / inventory land on
+                    // separate pages like the original document.
+                    if (!foundFirstCellMarker && !wasEmpty) prePageBreaks.add(allCells.size)
+                }
                 c == '\t' -> sb.append("    ")
                 c.code < 0x20 || c == '\u007F' || c == '\uFFFF' -> Unit
                 else -> sb.append(c)
@@ -153,8 +161,18 @@ object DocParser {
             }
         }
 
+        // ── Phase 3: Process everything before the main table ──────
+        // (Emitted first so the title page & instructions appear before the inventory.)
+        for (i in 0 until foundHeaderIdx) {
+            val cell = allCells[i].trim()
+            if (cell.isNotBlank()) {
+                emitFormattedParagraph(cell, blocks)
+                if (i + 1 in prePageBreaks) blocks += WordBlock.PageBreak
+            }
+        }
+
         // ── Phase 2: Extract the main table ───────────────────────
-        var idx = foundHeaderIdx
+        var idx2 = foundHeaderIdx
         val headerCells = allCells.subList(foundHeaderIdx, foundHeaderIdx + mainTableCols)
             .map { it.trim() }
 
@@ -166,17 +184,17 @@ object DocParser {
 
         // Data rows: sequential number/item pairs. Each visual row maps to 4
         // columns (Bil, Item, Ya, Tidak); Ya/Tidak are empty if missing.
-        idx = foundHeaderIdx + mainTableCols
-        while (idx < allCells.size) {
-            val noCell = allCells[idx].trim()
+        idx2 = foundHeaderIdx + mainTableCols
+        while (idx2 < allCells.size) {
+            val noCell = allCells[idx2].trim()
             val num = noCell.toIntOrNull()
             if (num == null || num < 1 || num > 200) {
                 val upper = noCell.uppercase()
                 if (postSectionMarkers.any { upper.startsWith(it) }) break
-                if (noCell.isBlank()) { idx++; continue }
+                if (noCell.isBlank()) { idx2++; continue }
                 break
             }
-            val itemText = if (idx + 1 < allCells.size) allCells[idx + 1].trim() else ""
+            val itemText = if (idx2 + 1 < allCells.size) allCells[idx2 + 1].trim() else ""
             mainTableRows += WordTableRow(
                 cells = listOf(
                     WordTableCell(listOf(WordBlock.Paragraph(listOf(WordRun(noCell))))),
@@ -185,7 +203,7 @@ object DocParser {
                     WordTableCell(listOf(WordBlock.Paragraph(emptyList()))),
                 )
             )
-            idx += 2
+            idx2 += 2
         }
 
         if (mainTableRows.size >= 3) {
@@ -194,15 +212,9 @@ object DocParser {
             blocks += WordBlock.Table(rows = mainTableRows, columnWidths = widths)
         }
 
-        // ── Phase 3: Process everything before the main table ──────
-        for (i in 0 until foundHeaderIdx) {
-            val cell = allCells[i].trim()
-            if (cell.isNotBlank()) emitFormattedParagraph(cell, blocks)
-        }
-
         // ── Phase 4: Process everything after the main table ───────
         // Resume from the last index actually consumed by the table (loop may break early).
-        val postCells = allCells.subList(idx, allCells.size).toMutableList()
+        val postCells = allCells.subList(idx2, allCells.size).toMutableList()
         processPostTableContent(postCells, blocks)
     }
 
@@ -259,7 +271,8 @@ object DocParser {
         }
 
         // ── Process each section ──────────────────────────────────
-        for (section in sections) {
+        for ((si, section) in sections.withIndex()) {
+            if (si > 0) blocks += WordBlock.PageBreak
             when {
                 section.marker.contains("BORANG JAWAPAN", ignoreCase = true) -> {
                     processAnswerForm(section.cells, blocks)
@@ -648,6 +661,15 @@ object DocParser {
         val traitPattern = Regex("(?=Trait personality yang menunjukkan)")
         val traitParts = text.split(traitPattern).filter { it.isNotBlank() }
         if (traitParts.size > 1) return traitParts.map { it.trim() }
+
+        // Very long unstructured text (form sections, interpretation prose): break it
+        // into sentence-sized paragraphs so it doesn't render as one giant wall.
+        if (text.length > 800) {
+            val sentences = text.split(Regex("(?<=[.!?])\\s+(?=[A-Z0-9(\u00AB])"))
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            if (sentences.size > 1) return sentences
+        }
 
         return listOf(text)
     }
