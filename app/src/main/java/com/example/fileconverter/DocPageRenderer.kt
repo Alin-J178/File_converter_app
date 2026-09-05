@@ -57,19 +57,25 @@ object DocPageRenderer {
                     val combined = block.runs.joinToString("") { it.text }
                     val fontSize = headingFontSize(block.level)
                     val r = drawWrappedText(canvas, combined, fontSize, true, false,
-                        android.graphics.Color.BLACK, 0, currentY, 16f, 12f, ::newPage)
+                        android.graphics.Color.BLACK, 0, block.alignment, currentY, 16f, 12f, ::newPage)
                     canvas = r.first; currentY = r.second
                 }
                 is WordBlock.Paragraph -> {
                     val combined = block.runs.joinToString("") { it.text }
-                    val isBold = block.runs.any { it.bold } || inferFormatting(combined).bold
-                    val fontSize = if (inferFormatting(combined).isHeading) inferFormatting(combined).headingSize
-                        else block.runs.firstOrNull { it.fontSize > 0f }?.fontSize ?: 13f
+                    val inferred = inferFormatting(combined)
+                    // Parser-provided formatting wins; inference is only a fallback
+                    // for parsers that don't emit explicit run styling.
+                    val hasExplicit = block.runs.any { it.bold || it.italic } ||
+                        block.runs.any { it.fontSize != 0f && it.fontSize != 12f }
+                    val isBold = block.runs.any { it.bold } || (!hasExplicit && inferred.bold)
+                    val fontSize = if (hasExplicit)
+                        (block.runs.firstOrNull { it.fontSize > 0f }?.fontSize ?: 13f)
+                    else if (inferred.isHeading) inferred.headingSize else 13f
                     val isItalic = block.runs.any { it.italic }
                     val color = block.runs.firstOrNull { it.color != 0 }?.color ?: android.graphics.Color.BLACK
                     val indent = if (block.indent.firstLine > 0f || block.indent.left > 0f) 1 else 0
                     val r = drawWrappedText(canvas, combined, fontSize, isBold, isItalic,
-                        color, indent, currentY, 0f, 8f, ::newPage)
+                        color, indent, block.alignment, currentY, 0f, 8f, ::newPage)
                     canvas = r.first; currentY = r.second
                 }
                 is WordBlock.ListItem -> {
@@ -79,7 +85,7 @@ object DocPageRenderer {
                     val fontSize = block.runs.firstOrNull { it.fontSize > 0f }?.fontSize ?: 13f
                     val color = block.runs.firstOrNull { it.color != 0 }?.color ?: android.graphics.Color.BLACK
                     val r = drawWrappedText(canvas, combined, fontSize, isBold, false,
-                        color, block.level, currentY, 0f, 4f, ::newPage)
+                        color, block.level, DocAlignment.LEFT, currentY, 0f, 4f, ::newPage)
                     canvas = r.first; currentY = r.second
                 }
                 is WordBlock.PageBreak -> { canvas = newPage() }
@@ -96,20 +102,20 @@ object DocPageRenderer {
                 is WordBlock.ChartBlock -> {
                     if (block.title.isNotEmpty()) {
                         val r = drawWrappedText(canvas, block.title, 14f, true, false,
-                            android.graphics.Color.BLACK, 0, currentY, 0f, 0f, ::newPage)
+                            android.graphics.Color.BLACK, 0, DocAlignment.LEFT, currentY, 0f, 0f, ::newPage)
                         canvas = r.first; currentY = r.second
                     }
                     for (s in block.series) {
                         val label = "${s.name}: ${s.values.joinToString(", ") { String.format("%.0f", it) }}"
                         val r = drawWrappedText(canvas, label, 11f, false, false,
-                            android.graphics.Color.DKGRAY, 0, currentY, 0f, 0f, ::newPage)
+                            android.graphics.Color.DKGRAY, 0, DocAlignment.LEFT, currentY, 0f, 0f, ::newPage)
                         canvas = r.first; currentY = r.second
                     }
                     currentY += 12f
                 }
                 is WordBlock.Unsupported -> {
                     val r = drawWrappedText(canvas, "[${block.description}]", 11f, false, false,
-                        android.graphics.Color.GRAY, 0, currentY, 0f, 4f, ::newPage)
+                        android.graphics.Color.GRAY, 0, DocAlignment.LEFT, currentY, 0f, 4f, ::newPage)
                     canvas = r.first; currentY = r.second
                 }
             }
@@ -123,7 +129,7 @@ object DocPageRenderer {
 
     private fun drawWrappedText(
         canvas: Canvas, text: String, fontSize: Float, isBold: Boolean, isItalic: Boolean,
-        color: Int, indent: Int, startY: Float,
+        color: Int, indent: Int, alignment: DocAlignment, startY: Float,
         spaceBefore: Float, spaceAfter: Float,
         newPage: () -> Canvas,
     ): Pair<Canvas, Float> {
@@ -135,11 +141,21 @@ object DocPageRenderer {
             isFakeBoldText = isBold
             this.color = color
             isAntiAlias = true
-            typeface = if (isBold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            typeface = when {
+                isBold && isItalic -> Typeface.create(Typeface.DEFAULT_BOLD, Typeface.ITALIC)
+                isBold -> Typeface.DEFAULT_BOLD
+                isItalic -> Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
+                else -> Typeface.DEFAULT
+            }
         }
         val maxWidth = USABLE_WIDTH - indent * 50
-        val x = MARGIN_LEFT + indent * 50f
         val lineHeight = fontSize * LINE_SPACING
+
+        fun lineX(w: Float): Float = when (alignment) {
+            DocAlignment.CENTER -> MARGIN_LEFT + (USABLE_WIDTH - w) / 2f
+            DocAlignment.RIGHT -> MARGIN_LEFT + USABLE_WIDTH - w
+            else -> MARGIN_LEFT + indent * 50f
+        }
 
         val words = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
         var currentLine = StringBuilder()
@@ -153,7 +169,7 @@ object DocPageRenderer {
                     canvasRef = newPage()
                     currentY = MARGIN_TOP.toFloat()
                 }
-                canvasRef.drawText(currentLine.toString(), x, currentY + fontSize, paint)
+                canvasRef.drawText(currentLine.toString(), lineX(paint.measureText(currentLine.toString())), currentY + fontSize, paint)
                 currentY += lineHeight
                 currentLine = StringBuilder(word)
             } else {
@@ -166,7 +182,7 @@ object DocPageRenderer {
                 canvasRef = newPage()
                 currentY = MARGIN_TOP.toFloat()
             }
-            canvasRef.drawText(currentLine.toString(), x, currentY + fontSize, paint)
+            canvasRef.drawText(currentLine.toString(), lineX(paint.measureText(currentLine.toString())), currentY + fontSize, paint)
             currentY += lineHeight
         }
 
@@ -188,9 +204,8 @@ object DocPageRenderer {
         var canvas = startCanvas
         var currentY = startY + 12f // spacing before table
 
-        // Resolve column widths
         val colWidths = resolveColumnWidths(table)
-        val totalCols = colWidths.size
+        val isQuestionnaire = colWidths.size == 4 && isQuestionnaireTable(table)
 
         // Pre-calculate row heights
         data class RowMetrics(val row: WordTableRow, val height: Float, val isHeader: Boolean)
@@ -205,8 +220,7 @@ object DocPageRenderer {
                 val spanWidth = (colIdx until min(colIdx + span, colWidths.size)).sumOf { colWidths[it].toDouble() }.toFloat()
                 val maxTextWidth = spanWidth - CELL_PADDING * 2
                 if (maxTextWidth > 0) {
-                    val cellText = cell.blocks.filterIsInstance<WordBlock.Paragraph>()
-                        .joinToString(" ") { it.runs.joinToString("") { r -> r.text } }
+                    val cellText = cellText(cell)
                     val words = cellText.split(" ")
                     var lineCount = 1
                     var curWidth = 0f
@@ -226,82 +240,112 @@ object DocPageRenderer {
             rowMetrics.add(RowMetrics(row, cellHeight, isHeader))
         }
 
-        // Draw rows with page break handling
-        for ((ri, metrics) in rowMetrics.withIndex()) {
-            val rowHeight = metrics.height
+        val headerMetrics = rowMetrics.firstOrNull { it.isHeader }
 
-            // Check if row fits on current page
-            if (currentY + rowHeight > PAGE_HEIGHT - MARGIN_BOTTOM) {
-                canvas = newPage()
-                currentY = MARGIN_TOP.toFloat()
-            }
-
+        // Draw a single row at (y). Returns nothing; caller advances y.
+        fun drawRow(rCanvas: Canvas, y: Float, metrics: RowMetrics) {
             val row = metrics.row
             val isHeader = metrics.isHeader
             val cellPaint = if (isHeader) HEADER_PAINT else CELL_PAINT
             var cellX = MARGIN_LEFT.toFloat()
             var colIdx = 0
-
-            for (cell in row.cells) {
+            for ((ci, cell) in row.cells.withIndex()) {
                 val span = cell.gridSpan.coerceAtLeast(1)
                 val spanWidth = (colIdx until min(colIdx + span, colWidths.size)).sumOf { colWidths[it].toDouble() }.toFloat()
-                val cellTop = currentY
+                val cellTop = y
                 val cellBg = cell.background
 
                 // Background
                 val bgColor = when {
                     cellBg != 0 -> cellBg
                     isHeader -> android.graphics.Color.rgb(235, 235, 235)
-                    ri % 2 == 1 -> android.graphics.Color.rgb(248, 248, 248)
                     else -> android.graphics.Color.TRANSPARENT
                 }
                 if (bgColor != android.graphics.Color.TRANSPARENT) {
                     val bgPaint = Paint().apply { color = bgColor; style = Paint.Style.FILL }
-                    canvas.drawRect(cellX, cellTop, cellX + spanWidth, cellTop + rowHeight, bgPaint)
+                    rCanvas.drawRect(cellX, cellTop, cellX + spanWidth, cellTop + metrics.height, bgPaint)
                 }
 
                 // Border
-                canvas.drawRect(cellX, cellTop, cellX + spanWidth, cellTop + rowHeight, BORDER_PAINT)
+                rCanvas.drawRect(cellX, cellTop, cellX + spanWidth, cellTop + metrics.height, BORDER_PAINT)
 
                 // Cell text
                 val maxTextWidth = spanWidth - CELL_PADDING * 2
-                if (maxTextWidth > 0) {
-                    val cellText = cell.blocks.filterIsInstance<WordBlock.Paragraph>()
-                        .joinToString(" ") { it.runs.joinToString("") { r -> r.text } }
-                    if (cellText.isNotBlank()) {
-                        val isCellBold = isHeader || cell.blocks.filterIsInstance<WordBlock.Paragraph>()
-                            .any { p -> p.runs.any { it.bold } }
-                        val paint = if (isCellBold) HEADER_PAINT else CELL_PAINT
-                        val words = cellText.split(" ")
-                        var textY = cellTop + CELL_PADDING + 12f
-                        var lineStart = StringBuilder()
-                        var lineWidth = 0f
-                        for (word in words) {
-                            val ww = paint.measureText(word)
-                            val testW = if (lineStart.isEmpty()) ww else lineWidth + paint.measureText(" ") + ww
-                            if (testW > maxTextWidth && lineStart.isNotEmpty()) {
-                                canvas.drawText(lineStart.toString(), cellX + CELL_PADDING, textY, paint)
-                                textY += 12f * LINE_SPACING
-                                lineStart = StringBuilder(word)
-                                lineWidth = ww
-                            } else {
-                                if (lineStart.isEmpty()) lineStart.append(word) else lineStart.append(" ").append(word)
-                                lineWidth = testW
-                            }
-                        }
-                        if (lineStart.isNotEmpty()) {
-                            canvas.drawText(lineStart.toString(), cellX + CELL_PADDING, textY, paint)
+                val text = cellText(cell)
+                if (maxTextWidth > 0 && text.isNotBlank()) {
+                    val isCellBold = isHeader || cell.blocks.filterIsInstance<WordBlock.Paragraph>()
+                        .any { p -> p.runs.any { it.bold } }
+                    val paint = if (isCellBold) HEADER_PAINT else CELL_PAINT
+                    val words = text.split(" ")
+                    var textY = cellTop + CELL_PADDING + 12f
+                    var lineStart = StringBuilder()
+                    var lineWidth = 0f
+                    for (word in words) {
+                        val ww = paint.measureText(word)
+                        val testW = if (lineStart.isEmpty()) ww else lineWidth + paint.measureText(" ") + ww
+                        if (testW > maxTextWidth && lineStart.isNotEmpty()) {
+                            rCanvas.drawText(lineStart.toString(), cellX + CELL_PADDING, textY, paint)
+                            textY += 12f * LINE_SPACING
+                            lineStart = StringBuilder(word)
+                            lineWidth = ww
+                        } else {
+                            if (lineStart.isEmpty()) lineStart.append(word) else lineStart.append(" ").append(word)
+                            lineWidth = testW
                         }
                     }
+                    if (lineStart.isNotEmpty()) {
+                        rCanvas.drawText(lineStart.toString(), cellX + CELL_PADDING, textY, paint)
+                    }
+                } else if (isQuestionnaire && ci >= 2 && text.isBlank()) {
+                    // Empty "Ya"/"Tidak" cells in a questionnaire get a checkbox box
+                    drawCheckBox(rCanvas, cellX, cellTop, spanWidth, metrics.height)
                 }
 
                 cellX += spanWidth
                 colIdx += span
             }
-            currentY += rowHeight
+        }
+
+        // Draw rows with page break handling + repeated header on each page
+        for ((ri, metrics) in rowMetrics.withIndex()) {
+            if (currentY + metrics.height > PAGE_HEIGHT - MARGIN_BOTTOM) {
+                canvas = newPage()
+                currentY = MARGIN_TOP.toFloat()
+                // Repeat the header row at the top of the new page, like most viewers.
+                if (ri > 0 && headerMetrics != null &&
+                    headerMetrics.height <= PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM
+                ) {
+                    drawRow(canvas, currentY, headerMetrics)
+                    currentY += headerMetrics.height
+                }
+            }
+            drawRow(canvas, currentY, metrics)
+            currentY += metrics.height
         }
 
         return canvas to currentY + 12f // + spacing after table
+    }
+
+    private fun cellText(cell: WordTableCell): String =
+        cell.blocks.filterIsInstance<WordBlock.Paragraph>()
+            .joinToString(" ") { it.runs.joinToString("") { r -> r.text } }
+
+    /** Questionnaire-style table: 4 columns where most data rows start with a small number. */
+    private fun isQuestionnaireTable(table: WordBlock.Table): Boolean {
+        val dataRows = table.rows.drop(1)
+        if (dataRows.isEmpty()) return false
+        val numeric = dataRows.count { row ->
+            row.cells.firstOrNull()?.let { c -> cellText(c).trim().toIntOrNull() != null } ?: false
+        }
+        return numeric.toFloat() / dataRows.size > 0.5f
+    }
+
+    private fun drawCheckBox(c: Canvas, x: Float, y: Float, w: Float, h: Float) {
+        val side = min(w, 14f) - 2f
+        if (side < 6f) return
+        val left = x + (w - side) / 2f
+        val top = y + (h - side) / 2f
+        c.drawRect(left, top, left + side, top + side, CHECK_PAINT)
     }
 
     private fun resolveColumnWidths(table: WordBlock.Table): List<Float> {
@@ -321,6 +365,11 @@ object DocPageRenderer {
             maxCols = maxOf(maxCols, colIdx)
         }
         if (maxCols < 1) maxCols = table.rows.maxOfOrNull { it.cells.size } ?: 4
+
+        // Questionnaire tables get narrow number/checkbox columns and a wide item column.
+        if (maxCols == 4 && isQuestionnaireTable(table)) {
+            return listOf(0.10f, 0.64f, 0.13f, 0.13f).map { it * USABLE_WIDTH }
+        }
 
         return List(maxCols) { USABLE_WIDTH / maxCols.toFloat() }
     }
@@ -358,6 +407,10 @@ object DocPageRenderer {
     private val BORDER_PAINT = Paint().apply {
         color = android.graphics.Color.rgb(180, 180, 180)
         style = Paint.Style.STROKE; strokeWidth = 1f
+    }
+    private val CHECK_PAINT = Paint().apply {
+        color = android.graphics.Color.rgb(120, 120, 120)
+        style = Paint.Style.STROKE; strokeWidth = 1.5f
     }
 
     private fun createBlankPage(): Bitmap {
