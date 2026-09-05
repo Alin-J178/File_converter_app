@@ -25,6 +25,17 @@ import java.util.zip.ZipOutputStream
 object PptToPptx {
 
     fun convert(context: Context, uri: Uri, displayName: String): Uri {
+        val pptxBytes = convertToBytes(context, uri)
+        return saveToDownloads(context, pptxBytes, displayName,
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+    }
+
+    /**
+     * Converts a legacy .ppt to .pptx and returns the bytes (no MediaStore write).
+     * Used by both the convert feature and the .ppt preview, which renders the
+     * converted .pptx through the same pptx WebView viewer as native .pptx files.
+     */
+    fun convertToBytes(context: Context, uri: Uri): ByteArray {
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             ?: error("Could not open the PPT file")
         if (bytes.size < 512) error("File too small to be a valid PPT")
@@ -39,9 +50,7 @@ object PptToPptx {
 
         if (slides.isEmpty()) error("No slides found in the PPT file")
 
-        val pptxBytes = buildPptx(slides, parser.slideWidth, parser.slideHeight)
-        return saveToDownloads(context, pptxBytes, displayName,
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+        return buildPptx(slides, parser.slideWidth, parser.slideHeight)
     }
 
     // ─────────────────────────────────────────────────────────────

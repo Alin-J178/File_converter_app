@@ -560,6 +560,106 @@ fun TextBlockRenderer(block: TextBlock, colors: AppColors, mono: FontFamily) {
     )
 }
 
+/**
+ * Shared WebView for the offline Office viewers (docx / xlsx+csv / pptx).
+ *
+ * Each format gets a virtual HTTPS host so fetch() is same-origin; bundled JS
+ * libraries and the cached document file are served through [WebAssets.intercept].
+ * The "Page X of Y" top-bar counter is driven by the Android JS bridge
+ * (setPage/onReady/onError) — sheet index for xlsx, slide number for pptx.
+ */
+@Composable
+private fun OfficeWebView(
+    ctx: android.content.Context,
+    uri: Uri,
+    ext: String,
+    onPage: (Int, Int) -> Unit,
+    onReady: () -> Unit,
+    onRenderError: (String) -> Unit,
+) {
+    val host = when (ext) {
+        "xlsx", "csv" -> "xlsx.local"
+        "pptx", "ppt" -> "pptx.local"
+        else -> "docx.local"
+    }
+    val ext2 = if (ext == "ppt") "pptx" else ext
+    val serveFile = "file.$ext2"
+    val cacheName = "web_preview_${uri.hashCode()}.$ext2"
+    val cacheMime = when (ext2) {
+        "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        "csv" -> "text/csv"
+        "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        else -> "application/octet-stream"
+    }
+    val viewerHtml = when (ext) {
+        "xlsx", "csv" -> "xlsx_viewer.html"
+        "pptx", "ppt" -> "pptx_viewer.html"
+        else -> "docx_viewer.html"
+    }
+    val assetFiles = when (ext) {
+        "xlsx", "csv" -> setOf("xlsx_viewer.html", "xlsx.full.min.js")
+        "pptx", "ppt" -> setOf("pptx_viewer.html", "pptx-preview.min.js")
+        else -> setOf("docx_viewer.html", "docx-preview.min.js", "jszip.min.js")
+    }
+
+    AndroidView(
+        factory = { context ->
+            WebView(context).apply {
+                layoutParams = android.view.ViewGroup.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                settings.javaScriptEnabled = true
+                settings.allowFileAccess = true
+                settings.domStorageEnabled = true
+                settings.loadWithOverviewMode = true
+                settings.useWideViewPort = true
+                settings.builtInZoomControls = true
+                settings.displayZoomControls = false
+                settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                addJavascriptInterface(object {
+                    @JavascriptInterface
+                    fun setPage(current: Int, total: Int) {
+                        post { onPage(current, total) }
+                    }
+                    @JavascriptInterface
+                    fun onReady() {
+                        post { onReady() }
+                    }
+                    @JavascriptInterface
+                    fun onError(message: String) {
+                        post {
+                            Log.e("OfficeWeb", "render error: $message")
+                            onRenderError(message)
+                        }
+                    }
+                }, "Android")
+                webViewClient = object : WebViewClient() {
+                    override fun shouldInterceptRequest(
+                        view: WebView,
+                        request: WebResourceRequest,
+                    ): WebResourceResponse? {
+                        // Serve the viewer HTML, bundled JS libraries and the cached
+                        // document file same-origin (xlsx.local / pptx.local / docx.local)
+                        // so fetch() works fully offline.
+                        return WebAssets.intercept(
+                            context, request.url.path ?: "",
+                            servePath = serveFile, cacheFile = cacheName, cacheMime = cacheMime,
+                            allowedAssetFiles = assetFiles,
+                        )
+                    }
+                }
+                // xlsx_viewer.html picks the file by ?file= query; others use a fixed name.
+                loadUrl("https://$host/$viewerHtml" + if (ext == "xlsx" || ext == "csv") "?file=$serveFile" else "")
+            }
+        },
+        update = { /* state flows through JS bridge */ },
+        modifier = Modifier.fillMaxSize(),
+    )
+}
+
 /* ===== Main composable ===== */
 @Composable
 fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
@@ -575,8 +675,16 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var err by remember { mutableStateOf<String?>(null) }
 
-    // WebView (docx-preview.js) rendering state for .docx files.
-    val isDocxWeb = ext == "docx" || mt.contains("wordprocessingml")
+    // WebView rendering state for docx / xlsx / pptx viewers (docx-preview.js,
+    // SheetJS, pptx-preview.js — all bundled in assets/ and served offline).
+    val isWebPreview = when {
+        ext == "docx" || mt.contains("wordprocessingml") -> true
+        ext == "xlsx" || mt.contains("spreadsheetml") -> true
+        ext == "csv" || mt.contains("csv") -> true
+        ext == "pptx" || mt.contains("presentationml") -> true
+        ext == "ppt" || mt.contains("powerpoint") -> true
+        else -> false
+    }
     var webReady by remember { mutableStateOf(false) }
     var webTotal by remember { mutableIntStateOf(0) }
     var webCur by remember { mutableIntStateOf(1) }
@@ -592,12 +700,20 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
                 android.util.Log.e("DOC_DEBUG", "Opening file: ext=$ext, mime=$mt")
                 when {
                     ext == "pdf" || mt.contains("pdf") -> bmps = renderPdfPages(ctx, uri)
-                    isDocxWeb -> {
-                        // .docx preview is rendered by docx-preview.js in a WebView (Part 4):
-                        // copy the bytes to a cache file that the WebView fetches same-origin.
-                        val cacheFile = java.io.File(ctx.cacheDir, "docx_preview_${uri.hashCode()}.docx")
-                        ctx.contentResolver.openInputStream(uri)?.use { input ->
-                            java.io.FileOutputStream(cacheFile).use { out -> input.copyTo(out) }
+                    isWebPreview -> {
+                        // docx / xlsx / csv / pptx are rendered by bundled JS libraries
+                        // inside a WebView (real Office rendering, offline). Legacy .ppt is
+                        // first converted to .pptx with the existing PptToPptx converter so
+                        // it shares the same viewer.
+                        val ext2 = if (ext == "ppt") "pptx" else ext
+                        val cacheFile = java.io.File(ctx.cacheDir, "web_preview_${uri.hashCode()}.$ext2")
+                        if (ext == "ppt") {
+                            val pptxBytes = PptToPptx.convertToBytes(ctx, uri)
+                            java.io.FileOutputStream(cacheFile).use { it.write(pptxBytes) }
+                        } else {
+                            ctx.contentResolver.openInputStream(uri)?.use { input ->
+                                java.io.FileOutputStream(cacheFile).use { out -> input.copyTo(out) }
+                            }
                         }
                         webReady = true
                     }
@@ -605,11 +721,7 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
                         val wordDoc = DocParser.parse(ctx, uri)
                         bmps = DocPageRenderer.render(wordDoc)
                     }
-                    ext == "xlsx" || mt.contains("spreadsheetml") -> doc = ParsedDocument.Spreadsheet(XlsxParser.parse(ctx, uri))
-                    ext == "xls" -> doc = ParsedDocument.Text(TextDocument(listOf(TextBlock("[XLS not supported]"))))
-                    ext == "pptx" || mt.contains("presentationml") -> doc = ParsedDocument.Presentation(PptxParser.parse(ctx, uri))
-                    ext == "ppt" || mt.contains("powerpoint") -> doc = ParsedDocument.Word(DocParser.parseLegacyPpt(ctx, uri))
-                    ext == "csv" || mt.contains("csv") -> doc = ParsedDocument.Spreadsheet(CsvParser.parse(ctx, uri))
+                    ext == "xls" -> doc = ParsedDocument.Spreadsheet(XlsxParser.parse(ctx, uri))
                     ext == "odt" || mt.contains("opendocument.text") -> {
                         val wordDoc = OdtParser.parse(ctx, uri)
                         bmps = DocPageRenderer.render(wordDoc)
@@ -626,7 +738,7 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
                     }
                     else -> doc = ParsedDocument.Text(TextDocument(listOf(TextBlock("Preview not available for .$ext"))))
                 }
-                if (doc == null && bmps.isEmpty() && !isDocxWeb) err = "Could not read file content"
+                if (doc == null && bmps.isEmpty() && !isWebPreview) err = "Could not read file content"
             } catch (e: Exception) {
                 Log.e("DocPreview", "Failed to parse $ext", e)
                 err = "Error: ${e.message ?: "Unknown"}"
@@ -635,8 +747,8 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
         }
     }
 
-    val tp = if (isDocxWeb) webTotal else if (bmps.isNotEmpty()) bmps.size else 1
-    val cur = if (isDocxWeb) webCur else pg + 1
+    val tp = if (isWebPreview) webTotal else if (bmps.isNotEmpty()) bmps.size else 1
+    val cur = if (isWebPreview) webCur else pg + 1
     val ac = Color(docFormatColor(ext))
 
     Box(modifier = Modifier.fillMaxSize().background(c.background).safeDrawingPadding()) {
@@ -695,80 +807,19 @@ fun DocumentPreviewScreen(uri: Uri, fileName: String, onBack: () -> Unit) {
                                 Text(err!!, color = c.pink, fontSize = 14.sp)
                             }
                         }
-                        isDocxWeb && webReady -> {
-                            // Part 4: docx-preview.js inside a WebView — real Word rendering
-                            // (styles, tables, page breaks) instead of the Canvas re-layout.
-                            AndroidView(
-                                factory = { context ->
-                                    WebView(context).apply {
-                                        layoutParams = android.view.ViewGroup.LayoutParams(
-                                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                        )
-                                        settings.javaScriptEnabled = true
-                                        settings.allowFileAccess = true
-                                        settings.domStorageEnabled = true
-                                        settings.loadWithOverviewMode = true
-                                        settings.useWideViewPort = true
-                                        settings.builtInZoomControls = true
-                                        settings.displayZoomControls = false
-                                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                                        settings.cacheMode = WebSettings.LOAD_NO_CACHE
-                                        addJavascriptInterface(object {
-                                            @JavascriptInterface
-                                            fun setPage(current: Int, total: Int) {
-                                                post {
-                                                    webCur = current
-                                                    webTotal = total
-                                                    loading = false
-                                                }
-                                            }
-                                            @JavascriptInterface
-                                            fun onReady() {
-                                                post { loading = false }
-                                            }
-                                            @JavascriptInterface
-                                            fun onError(message: String) {
-                                                post {
-                                                    Log.e("DocxWeb", "render error: $message")
-                                                    err = "Preview failed: $message"
-                                                    loading = false
-                                                }
-                                            }
-                                        }, "Android")
-                                        webViewClient = object : WebViewClient() {
-                                            override fun shouldInterceptRequest(
-                                                view: WebView,
-                                                request: WebResourceRequest,
-                                            ): WebResourceResponse? {
-                                                val urlPath = request.url.path?.trimStart('/') ?: ""
-                                                // Serve the cached docx + bundled JS libraries
-                                                // same-origin (docx.local) so fetch() works offline.
-                                                return when {
-                                                    urlPath == "file.docx" -> {
-                                                        val f = java.io.File(context.cacheDir, "docx_preview_${uri.hashCode()}.docx")
-                                                        if (f.exists()) {
-                                                            WebResourceResponse(
-                                                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                                                null, f.inputStream(),
-                                                            )
-                                                        } else null
-                                                    }
-                                                    urlPath == "jszip.min.js" || urlPath == "docx-preview.min.js" -> {
-                                                        try {
-                                                            val am = context.assets
-                                                            WebResourceResponse("application/javascript", "utf-8", am.open(urlPath))
-                                                        } catch (_: Exception) { null }
-                                                    }
-                                                    else -> null
-                                                }
-                                            }
-                                        }
-                                        loadUrl("https://docx.local/docx_viewer.html")
-                                    }
+                        isWebPreview && webReady -> {
+                            OfficeWebView(
+                                ctx, uri, ext,
+                                onPage = { cur2, tot ->
+                                    webCur = cur2
+                                    webTotal = tot
+                                    loading = false
                                 },
-                                update = { /* state flows through JS bridge */ },
-                                modifier = Modifier.fillMaxSize(),
+                                onReady = { loading = false },
+                                onRenderError = { msg ->
+                                    err = "Preview failed: $msg"
+                                    loading = false
+                                },
                             )
                         }
                         bmps.isNotEmpty() -> {
